@@ -1,11 +1,11 @@
-use anyhow::{Context, Error};
+use anyhow::Error;
 use clap::Parser;
-use rust_htslib::bam::{Read, Reader, Record};
+use rust_htslib::bam::{Header, Read, Reader, Record, Writer};
 
 #[derive(Parser)]
 pub struct Args {
     pub input: String,
-    pub output: String,
+    // pub output: Option<String>,
 }
 
 pub struct ReadBuffer {
@@ -62,6 +62,16 @@ fn main() -> Result<(), Error> {
 
     for record in reader.records() {
         read_buf.push(record?);
+    }
+
+    let mut writer = Writer::from_stdout(
+        &Header::from_template(reader.header()),
+        rust_htslib::bam::Format::Bam,
+    )?;
+
+    for r in read_buf.rbuf {
+        // writer.write(&r)?
+        println! {"POS: {}, LEN: {}", r.pos(), r.seq_len()};
     }
 
     Ok(())
