@@ -1,7 +1,12 @@
-use rust_htslib::bam::Record;
+use rust_htslib::bam::{record::CigarStringView, Record};
+
+pub struct PileUpRecord {
+    pub rec: Record,
+    pub cstate: CigarState,
+}
 
 pub struct ReadBuffer {
-    pub rbuf: Vec<Record>,
+    pub rbuf: Vec<PileUpRecord>,
     pub len: usize,
     pub pos: usize,
     pub tid: u32,
@@ -14,9 +19,17 @@ pub enum BufPushResult {
     DifferentReference,
 }
 
+pub struct CigarState {
+    pub cig: CigarStringView,
+    pub icig: usize,  // position in cigar string
+    pub iseq: u32,    // position in read sequence that corresponds to cigar pos
+    pub bam_pos: u32, // ref coord of first base
+}
+
 impl ReadBuffer {
     pub fn push(&mut self, r: Record) -> BufPushResult {
         if r.tid() as u32 != self.tid {
+            println! {"diff ref"}
             return BufPushResult::DifferentReference;
         }
 
@@ -25,21 +38,30 @@ impl ReadBuffer {
         }
 
         if r.pos() as usize + self.len < self.pos {
+            println! {"before window"}
             return BufPushResult::BeforeWindow;
         }
 
         if r.pos() as usize > self.pos + self.len {
+            println! {"{} {} after window", self.pos, self.len}
             return BufPushResult::AfterWindow;
         }
 
-        self.rbuf.push(r);
+        let cstate = CigarState {
+            cig: r.cigar(),
+            icig: 0,
+            iseq: 0,
+            bam_pos: r.pos() as u32,
+        };
+
+        self.rbuf.push(PileUpRecord { rec: r, cstate });
         BufPushResult::Pushed
     }
 
     pub fn new() -> Self {
-        let rbuf: Vec<Record> = Vec::with_capacity(500);
+        let rbuf: Vec<PileUpRecord> = Vec::with_capacity(500);
         let len = 0;
-        let pos = 0;
+        let pos = 1;
         let tid = 0;
 
         Self {
@@ -48,16 +70,5 @@ impl ReadBuffer {
             pos,
             tid,
         }
-    }
-
-    /// Process all reads in a rbuf (analogous to mplp_set_pileup)
-    /// https://github.com/samtools/bcftools/blob/05621cfee236a5826d68263d6f566be1443be717/mpileup2/mpileup.c#L880
-    pub fn gen_pileup(&mut self) {
-        // remember to remove reads here that are at the very end of their c-state
-        //
-        for r in self.rbuf.iter() {
-            println! {"POS: {}, LEN: {}, CIG: {:?}", r.pos(), r.seq_len(), r.cigar()}
-        }
-        unimplemented!();
     }
 }

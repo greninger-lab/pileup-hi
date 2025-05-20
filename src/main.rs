@@ -1,7 +1,5 @@
-use crate::read_buf::{BufPushResult, ReadBuffer};
 use anyhow::Error;
 use clap::Parser;
-use rust_htslib::bam::{Header, Read, Reader, Record, Writer};
 
 mod read_buf;
 mod rpileup;
@@ -13,11 +11,18 @@ pub struct Args {
 
 fn main() -> Result<(), Error> {
     let args = Args::parse();
-    let pos = 782;
+    let pos = 0;
     let tid = 0;
 
     let mut pileup = rpileup::PileUp::new(&args.input, Some(tid), Some(pos))?;
-    pileup.next()?;
+    let mut ret: rpileup::IterResult;
+    loop {
+        ret = pileup.next()?;
+        match ret {
+            rpileup::IterResult::NoData => break,
+            _ => (),
+        }
+    }
 
     Ok(())
 }
