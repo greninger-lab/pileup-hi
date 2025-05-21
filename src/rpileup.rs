@@ -7,7 +7,6 @@ use std::collections::VecDeque;
 
 const UNINIT_POS: usize = usize::MAX - 1;
 const UNINIT_TID: u32 = u32::MAX - 1;
-const BASE_SPACER: &str = "";
 
 pub struct PileUp {
     tid: u32,
@@ -40,7 +39,6 @@ pub fn cigar_get_pos(cs: &mut CigarState, pos: u32, ipos: &mut i32) -> CigarResu
         }
 
         op = cig[cs.icig];
-        // println!("{:?} {} {} {}", op, cs.bam_pos, pos, cs.cig);
         match op {
             Cigar::Match(len) | Cigar::Equal(len) | Cigar::Diff(len) => {
                 let end_pos = cs.bam_pos + len - 1;
@@ -104,10 +102,8 @@ impl PileUp {
         let tid = tid.unwrap_or(UNINIT_TID);
         let pos = pos.unwrap_or(UNINIT_POS);
         let reader = Reader::from_path(bam_fname)?;
-        let mut rbuf = read_buf::ReadBuffer::new();
+        let rbuf = read_buf::ReadBuffer::new();
         let header = reader.header().clone();
-        rbuf.pos = pos;
-        rbuf.tid = tid;
 
         Ok(Self {
             tid,
@@ -120,20 +116,30 @@ impl PileUp {
 
     pub fn fill_buffer(&mut self) -> Result<read_buf::BufPushResult, Error> {
         let mut ret: read_buf::BufPushResult = read_buf::BufPushResult::DifferentReference;
-        let mut pos: i64;
 
-        if self.rbuf.rbuf.is_empty() || self.pos == UNINIT_POS {
-            let first = self.reader.records().next().context("no read")??;
-            self.pos = first.pos() as usize;
-            self.tid = first.tid() as u32;
-            self.rbuf.pos = first.pos() as usize;
-            self.rbuf.tid = first.tid() as u32;
+        if self.pos == UNINIT_POS {
+            if let Some(next_read) = self.reader.records().next() {
+                let next_read = next_read?;
+                self.pos = next_read.pos() as usize;
+                self.tid = next_read.tid() as u32;
+                let ret = self.rbuf.push(next_read, self.pos, self.tid);
+                assert!(ret == read_buf::BufPushResult::Pushed);
+            } else {
+                return Ok(read_buf::BufPushResult::DifferentReference);
+            }
         }
 
+        let mut prev_pos = i64::MIN;
         for rec in self.reader.records() {
             let r = rec?;
 
-            ret = self.rbuf.push(r);
+            if r.pos() < prev_pos {
+                panic!("BAD POS!")
+            }
+
+            prev_pos = r.pos();
+
+            ret = self.rbuf.push(r, self.pos, self.tid);
 
             match ret {
                 read_buf::BufPushResult::AfterWindow => {
@@ -149,17 +155,15 @@ impl PileUp {
     pub fn set_pileup(&mut self) -> Result<(), Error> {
         let mut ndel @ mut nins @ mut nbases = 0;
         let mut to_remove: VecDeque<usize> = VecDeque::new();
+        let mut seq: Vec<u8> = Vec::new();
 
-        print! {"{}\t{}\t", std::str::from_utf8(self.header.tid2name(self.tid))?, self.pos}
         for (i, r) in self.rbuf.rbuf.iter_mut().enumerate() {
             let mut ipos: i32 = -1;
             let ret = cigar_get_pos(&mut r.cstate, self.pos as u32, &mut ipos);
-            // println! {"{:?} {} {} {} {}", ret, self.pos, r.rec.pos(), r.cstate.cig, r.cstate.icig}
             match ret {
                 CigarResult::Op(Cigar::Match(_)) => {
-                    let base = String::from_utf8(vec![r.rec.seq()[ipos as usize]])?;
+                    seq.push(r.rec.seq()[ipos as usize]);
 
-                    print! {"{BASE_SPACER}{base}"}
                     nbases += 1;
                 }
 
@@ -180,7 +184,8 @@ impl PileUp {
             }
         }
 
-        // assert_eq!(nbases, self.rbuf.rbuf.len(), "{}", self.pos);
+        print! {"{}\t{}\t{}\t", std::str::from_utf8(self.header.tid2name(self.tid))?, self.pos, nbases}
+        print! {"{}", std::str::from_utf8(&seq)?}
 
         while let Some(i) = to_remove.pop_back() {
             self.rbuf.rbuf.swap_remove(i);
@@ -192,12 +197,18 @@ impl PileUp {
     }
 
     pub fn next(&mut self) -> Result<IterResult, Error> {
-        self.pos += 1;
+        if self.pos != UNINIT_POS {
+            self.pos += 1;
+        }
+
+        if self.tid == UNINIT_TID {
+            self.tid = 0;
+        }
+
+        let ref_len = self.header.target_len(self.tid).context("no ref len")? as usize;
 
         // reached end of reference, so increment tid
-        if self.pos != UNINIT_POS + 1
-            && self.pos >= self.header.target_len(self.tid).context("no len")? as usize
-        {
+        if self.pos != UNINIT_POS && self.pos >= ref_len {
             self.tid += 1;
             self.pos = UNINIT_POS;
 
@@ -210,7 +221,7 @@ impl PileUp {
             }
         }
         let _r = self.fill_buffer();
-        _ = self.set_pileup();
+        self.set_pileup()?;
         Ok(IterResult::Generated)
     }
 }

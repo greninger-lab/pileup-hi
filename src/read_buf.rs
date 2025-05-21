@@ -8,11 +8,9 @@ pub struct PileUpRecord {
 pub struct ReadBuffer {
     pub rbuf: Vec<PileUpRecord>,
     pub len: usize,
-    pub pos: usize,
-    pub tid: u32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum BufPushResult {
     BeforeWindow,
     AfterWindow,
@@ -28,9 +26,8 @@ pub struct CigarState {
 }
 
 impl ReadBuffer {
-    pub fn push(&mut self, r: Record) -> BufPushResult {
-        if r.tid() as u32 != self.tid {
-            println! {"diff ref"}
+    pub fn push(&mut self, r: Record, pos: usize, tid: u32) -> BufPushResult {
+        if r.tid() as u32 != tid {
             return BufPushResult::DifferentReference;
         }
 
@@ -38,12 +35,11 @@ impl ReadBuffer {
             self.len = r.seq_len();
         }
 
-        if r.pos() as usize + self.len < self.pos {
+        if r.pos() as usize + self.len < pos {
             return BufPushResult::BeforeWindow;
         }
 
-        if r.pos() as usize > self.pos + self.len {
-            println! {"STOPPING FILL: {} < {} + {}", self.pos, r.pos(), self.len}
+        if r.pos() as usize > pos + self.len {
             return BufPushResult::AfterWindow;
         }
 
@@ -61,14 +57,7 @@ impl ReadBuffer {
     pub fn new() -> Self {
         let rbuf: Vec<PileUpRecord> = Vec::with_capacity(500);
         let len = 0;
-        let pos = 1;
-        let tid = 0;
 
-        Self {
-            rbuf,
-            len,
-            pos,
-            tid,
-        }
+        Self { rbuf, len }
     }
 }
