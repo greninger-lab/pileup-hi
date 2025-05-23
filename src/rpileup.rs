@@ -24,6 +24,8 @@ pub struct PileUp {
     reader: Reader,
     header: HeaderView,
     ref_seq: Option<Vec<u8>>,
+    next_record: Option<Record>,
+    coverage: u32,
 }
 
 pub enum IterResult {
@@ -74,128 +76,6 @@ pub fn get_base_pileup(
 
     kstring_buf.push(base);
 }
-
-/// Get the base of a read at a specific reference coordinate, considering the cigar of the
-/// alignment. This is necessary to adjust for clipped bases, insertions, and deletions that would
-/// not be accounted for when blindly indexing into the read sequence.
-///
-/// This function will traverse the cigar string up until or after the queried reference position,
-/// will adjust the read start and end according to clips, deletions, and insertions, and return
-/// whether the base in the read aligned to the reference is absent (e.g. softclip) or present.
-// pub fn cigar_get_pos(cs: &mut CigarState, pos: u32, ipos: &mut i32) -> CigarResult {
-//     // read not yet processed
-//     let mut k: usize = 0;
-//     if cs.icig == CIG_POS_UNINIT {
-//         cs.icig = 0;
-//         match cs.cig[0] {
-//             Cigar::Match(_) | Cigar::Equal(_) | Cigar::Diff(_) => (),
-
-//             _ => {
-//                 let n_cig = cs.cig.len();
-//                 for i in 0..n_cig {
-//                     k = i;
-//                     match cs.cig[k] {
-//                         Cigar::Match(_)
-//                         | Cigar::Del(_)
-//                         | Cigar::RefSkip(_)
-//                         | Cigar::Equal(_)
-//                         | Cigar::Diff(_) => break,
-//                         Cigar::Ins(l) | Cigar::SoftClip(l) => *ipos += l as i32,
-//                         _ => (),
-//                     }
-//                     assert!(cs.icig < n_cig);
-//                     cs.icig = k;
-//                 }
-//             }
-//         }
-//     } else {
-//         let mut op = cs.cig[cs.icig];
-//         // the queried position is not covered by this op
-//         // so we jump to the next one if it exists
-//         if pos - cs.bam_pos >= op.len() {
-//             assert!(cs.icig < cs.cig.len());
-//             op = cs.cig[cs.icig + 1];
-//             // if the next op is anything but clipped, and the current op is also not clipped, then
-//             // increment sequence index/len
-//             //
-//             // this way, if we have CLIP->NON_CLIP or NON_CLIP->CLIP, we avoid adding incrementing
-//             // the seq index by the amount of softclipped bases when we jump to the next op.
-//             match op {
-//                 Cigar::Match(_)
-//                 | Cigar::Del(_)
-//                 | Cigar::RefSkip(_)
-//                 | Cigar::Equal(_)
-//                 | Cigar::Diff(_) => match cs.cig[cs.icig] {
-//                     Cigar::Match(l) | Cigar::Equal(l) | Cigar::Diff(l) => cs.iseq += l,
-//                     _ => (),
-//                 },
-
-//                 _ => (),
-//             }
-
-//             cs.icig += 1;
-
-//             // =============================================================================
-//             // The next op is a clip of some kind, so increment sequence index by length and
-//             // proceed to find the next non-clip op.
-//             // We do this to avoid incrementing the sequence index with non-existent "bases"
-//             // spanning the clip.
-//             // =============================================================================
-//         } else {
-//             match cs.cig[cs.icig] {
-//                 Cigar::Match(l) | Cigar::Equal(l) | Cigar::Diff(l) => cs.iseq += l,
-//                 _ => (),
-//             };
-
-//             // we need to find the next non-clip
-//             // we also increment the ref index to account for soft clips
-//             for i in cs.icig + 1..cs.cig.len() {
-//                 k = i;
-//                 match cs.cig[i] {
-//                     Cigar::Match(_)
-//                     | Cigar::Del(_)
-//                     | Cigar::RefSkip(_)
-//                     | Cigar::Equal(_)
-//                     | Cigar::Diff(_) => break, // non-clip found
-//                     Cigar::Ins(l) | Cigar::SoftClip(l) => cs.iseq += l, // no bases, add to
-//                     _ => (),
-//                 }
-//             }
-
-//             cs.icig = k;
-//         }
-//         assert!(cs.icig < cs.cig.len());
-//     }
-
-//     // now to get pileup
-//     let mut op: Cigar;
-//     op = cs.cig[cs.icig];
-
-//     // queried pos is covered by next cig op
-//     if cs.bam_pos + op.len() - 1 == pos && cs.icig + 1 < cs.cig.len() {
-//         let mut next_op = cs.cig[cs.icig + 1];
-
-//         // if next_op == Cigar::Ins(next_op.len()) {
-//         //     // update indel
-//         //     for k in cs.icig + 2..cs.cig.len() {
-//         //         next_op = cs.cig[k];
-//         //         if
-//         //     }
-//         // }
-//     }
-
-//     match op {
-//         Cigar::Match(l) | Cigar::Equal(l) | Cigar::Diff(l) => {
-//             // update pos
-//         },
-
-//         Cigar::Del(l) | Cigar::RefSkip(l) => {
-
-//         }
-//     }
-
-//     todo!();
-// }
 
 pub fn cigar_get_pos(cs: &mut CigarState, pos: u32, ipos: &mut i32) -> CigarResult {
     let cig = &cs.cig;
@@ -256,6 +136,8 @@ pub fn cigar_get_pos(cs: &mut CigarState, pos: u32, ipos: &mut i32) -> CigarResu
                     cs.icig += 1;
                     continue;
                 }
+
+                return CigarResult::BaseEmpty();
             }
             _ => (),
         }
@@ -272,6 +154,8 @@ impl PileUp {
         let rbuf = read_buf::ReadBuffer::new();
         let header = reader.header().clone();
         let ref_seq = None;
+        let next_record = None;
+        let coverage = 0;
 
         Ok(Self {
             tid,
@@ -280,11 +164,29 @@ impl PileUp {
             reader,
             header,
             ref_seq,
+            next_record,
+            coverage,
         })
     }
 
-    pub fn fill_buffer(&mut self) -> Result<read_buf::BufPushResult, Error> {
-        let mut ret: read_buf::BufPushResult = read_buf::BufPushResult::DifferentReference;
+    pub fn fill_buffer(&mut self) -> Result<(), Error> {
+        let mut ret: read_buf::BufPushResult;
+
+        let mut prev_pos = i64::MIN;
+
+        if let Some(next_record) = self.next_record.take() {
+            prev_pos = next_record.pos();
+            let ret = self.rbuf.push(next_record, self.pos, self.tid);
+
+            match ret {
+                read_buf::BufPushResult::AfterWindow(r)
+                | read_buf::BufPushResult::DifferentReference(r) => {
+                    self.next_record = Some(r);
+                    return Ok(());
+                }
+                _ => self.next_record = None,
+            }
+        }
 
         // if our first read for the reference
         if self.pos == UNINIT_POS {
@@ -295,29 +197,38 @@ impl PileUp {
                 let ret = self.rbuf.push(next_read, self.pos, self.tid);
                 assert!(ret == read_buf::BufPushResult::Pushed);
             } else {
-                return Ok(read_buf::BufPushResult::DifferentReference);
+                return Ok(());
             }
         }
 
-        let mut prev_pos = i64::MIN;
         for rec in self.reader.records() {
             let r = rec?;
 
+            if r.is_unmapped() {
+                continue;
+            }
+
             if r.pos() < prev_pos {
-                panic!("UNSORTED BAM!")
+                panic!("UNSORTED BAM! {} {}", r.pos(), prev_pos)
             }
 
             prev_pos = r.pos();
+            // println! {"{prev_pos}"}
 
             ret = self.rbuf.push(r, self.pos, self.tid);
 
             match ret {
-                read_buf::BufPushResult::AfterWindow => break,
-                read_buf::BufPushResult::DifferentReference => break,
+                read_buf::BufPushResult::Unmapped => continue,
+                read_buf::BufPushResult::AfterWindow(next_rec)
+                | read_buf::BufPushResult::DifferentReference(next_rec) => {
+                    self.next_record = Some(next_rec);
+                    break;
+                }
                 _ => (),
             }
         }
-        Ok(ret)
+        // println! {"done reading"};
+        Ok(())
     }
 
     pub fn set_pileup(&mut self) -> Result<(), Error> {
@@ -330,8 +241,16 @@ impl PileUp {
         };
 
         for (i, r) in self.rbuf.rbuf.iter_mut().enumerate() {
+            if r.rec.reference_end() - 1 < self.pos as i64 {
+                self.coverage -= 1;
+                to_remove.push_back(i);
+                continue;
+            }
+
             let mut ipos: i32 = -1;
             let ret = cigar_get_pos(&mut r.cstate, self.pos as u32, &mut ipos);
+            self.coverage += 1;
+
             match ret {
                 CigarResult::Op(Cigar::Match(_)) => {
                     get_base_pileup(&r.cstate, &r.rec, ipos as u32, self.pos, &mut seq, ref_base);
@@ -348,6 +267,12 @@ impl PileUp {
                 }
 
                 CigarResult::BeforePos() => {
+                    panic!(
+                        "{} {} {}",
+                        r.rec.is_unmapped(),
+                        self.pos,
+                        r.rec.reference_end() - 1
+                    );
                     to_remove.push_back(i);
                 }
 

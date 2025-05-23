@@ -1,4 +1,7 @@
-use rust_htslib::bam::{record::CigarStringView, Record};
+use rust_htslib::bam::{
+    record::{Cigar, CigarStringView},
+    Record,
+};
 
 pub const CIG_POS_UNINIT: usize = usize::MAX - 1;
 
@@ -15,9 +18,10 @@ pub struct ReadBuffer {
 #[derive(Debug, Eq, PartialEq)]
 pub enum BufPushResult {
     BeforeWindow,
-    AfterWindow,
+    AfterWindow(Record),
     Pushed,
-    DifferentReference,
+    DifferentReference(Record),
+    Unmapped,
 }
 
 pub struct CigarState {
@@ -27,22 +31,43 @@ pub struct CigarState {
     pub bam_pos: u32, // ref coord of first base
 }
 
+pub fn cigar2rlen(r: &Record) -> usize {
+    let mut len = 0;
+    for op in &r.cigar() {
+        match op {
+            Cigar::Match(l)
+            | Cigar::Del(l)
+            | Cigar::RefSkip(l)
+            | Cigar::Equal(l)
+            | Cigar::Diff(l) => len += l,
+            _ => (),
+        }
+    }
+
+    len as usize
+}
+
 impl ReadBuffer {
     pub fn push(&mut self, r: Record, pos: usize, tid: u32) -> BufPushResult {
+        if r.is_unmapped() {
+            return BufPushResult::Unmapped;
+        }
+
         if r.tid() as u32 != tid {
-            return BufPushResult::DifferentReference;
+            return BufPushResult::DifferentReference(r);
         }
 
-        if r.seq_len() > self.len {
-            self.len = r.seq_len();
+        if cigar2rlen(&r) > self.len {
+            self.len = cigar2rlen(&r);
         }
 
-        if r.pos() as usize + self.len < pos {
+        if r.pos() as usize + self.len - 1 < pos {
+            panic!();
             return BufPushResult::BeforeWindow;
         }
 
-        if r.pos() as usize > pos + self.len {
-            return BufPushResult::AfterWindow;
+        if r.pos() as usize > pos + self.len - 1 {
+            return BufPushResult::AfterWindow(r);
         }
 
         let cstate = CigarState {
