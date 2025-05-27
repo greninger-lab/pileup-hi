@@ -14,11 +14,20 @@ fn main() -> Result<(), Error> {
 
     let mut pileup = rpileup::PileupIterator::new(&args.input, None, None)?;
     let mut ret: rpileup::IterResult;
+
     loop {
-        ret = pileup.next()?;
+        println! {"initializing to ref..."}
+        ret = pileup.init_to_ref()?;
+
         match ret {
-            rpileup::IterResult::NoData | rpileup::IterResult::ReferenceEnd => break,
-            _ => (),
+            rpileup::IterResult::NoData => break,
+            _ => loop {
+                match pileup.next()? {
+                    rpileup::IterResult::ReferenceEnd => break,
+                    rpileup::IterResult::NoData => panic!(),
+                    _ => (),
+                }
+            },
         }
     }
 

@@ -21,12 +21,15 @@ pub struct PileupIterator {
     tid: u32,
     pos: usize,
     next_pos: usize,
+    max_pos: usize,
     rbuf: read_buf::ReadBuffer,
     reader: Reader,
     header: HeaderView,
     ref_seq: Option<Vec<u8>>,
     next_record: Option<Record>,
     coverage: u32,
+    seq_buf: Vec<u8>,
+    remove_buf: VecDeque<usize>,
 }
 
 pub enum IterResult {
@@ -152,24 +155,29 @@ pub fn cigar_get_pos(cs: &mut CigarState, pos: u32, ipos: &mut i32) -> Pileup {
 impl PileupIterator {
     pub fn new(bam_fname: &str, tid: Option<u32>, pos: Option<usize>) -> Result<Self, Error> {
         let tid = tid.unwrap_or(UNINIT_TID);
-        let pos @ next_pos = pos.unwrap_or(UNINIT_POS);
+        let pos @ next_pos @ max_pos = pos.unwrap_or(UNINIT_POS);
         let reader = Reader::from_path(bam_fname)?;
         let rbuf = read_buf::ReadBuffer::new();
         let header = reader.header().clone();
         let ref_seq = None;
         let next_record = None;
         let coverage = 0;
+        let remove_buf = VecDeque::with_capacity(500);
+        let seq_buf = Vec::with_capacity(500);
 
         Ok(Self {
             tid,
             pos,
             next_pos,
+            max_pos,
             rbuf,
             reader,
             header,
             ref_seq,
             next_record,
             coverage,
+            seq_buf,
+            remove_buf,
         })
     }
 
@@ -246,15 +254,17 @@ impl PileupIterator {
 
     pub fn write_pileup_str(
         &mut self,
-        seq_str: Option<&mut Vec<u8>>,
         ref_base: u8,
         nbases: usize,
         nins: usize,
         ndel: usize,
     ) -> Result<(), Error> {
         print! {"{}\t{}\t{}\t{}\t", std::str::from_utf8(self.header.tid2name(self.tid))?, self.pos + 1, char::from(ref_base), nbases + nins + ndel }
-        if let Some(seq) = seq_str {
-            print! {"{}", std::str::from_utf8(&seq)?}
+        if self.seq_buf.is_empty() {
+            print! {"*"}
+        } else {
+            print! {"{}", std::str::from_utf8(&self.seq_buf)?}
+            self.seq_buf.clear();
         }
 
         print! {"\n"}
@@ -263,9 +273,9 @@ impl PileupIterator {
     }
 
     pub fn set_pileup(&mut self) -> Result<(), Error> {
+        assert!(self.remove_buf.is_empty());
+
         let mut ndel @ mut nins @ mut nbases = 0;
-        let mut to_remove: VecDeque<usize> = VecDeque::new();
-        let mut seq: Vec<u8> = Vec::new();
         let ref_base = match &self.ref_seq {
             Some(seq) => seq[self.pos],
             None => b'N',
@@ -274,7 +284,7 @@ impl PileupIterator {
         for (i, r) in self.rbuf.rbuf.iter_mut().enumerate() {
             if r.rec.reference_end() - 1 < self.pos as i64 {
                 self.coverage -= 1;
-                to_remove.push_back(i);
+                self.remove_buf.push_back(i);
                 continue;
             }
 
@@ -284,7 +294,14 @@ impl PileupIterator {
 
             match ret {
                 Pileup::Op(Cigar::Match(_)) => {
-                    get_base_pileup(&r.cstate, &r.rec, ipos as u32, self.pos, &mut seq, ref_base);
+                    get_base_pileup(
+                        &r.cstate,
+                        &r.rec,
+                        ipos as u32,
+                        self.pos,
+                        &mut self.seq_buf,
+                        ref_base,
+                    );
 
                     nbases += 1;
                 }
@@ -304,7 +321,7 @@ impl PileupIterator {
                         self.pos,
                         r.rec.reference_end() - 1
                     );
-                    to_remove.push_back(i);
+                    // to_remove.push_back(i);
                 }
 
                 Pileup::BaseEmpty() => (),
@@ -312,50 +329,52 @@ impl PileupIterator {
             }
         }
 
-        self.write_pileup_str(Some(&mut seq), ref_base, nbases, nins, ndel)?;
+        self.write_pileup_str(ref_base, nbases, nins, ndel)?;
 
-        //         print! {"{}\t{}\t{}\t{}\t", std::str::from_utf8(self.header.tid2name(self.tid))?, self.pos + 1, char::from(ref_base), nbases + nins + ndel }
-        //         print! {"{}", std::str::from_utf8(&seq)?}
-
-        while let Some(i) = to_remove.pop_back() {
+        while let Some(i) = self.remove_buf.pop_back() {
             self.rbuf.rbuf.swap_remove(i);
         }
-
-        // print! {"\n"}
 
         Ok(())
     }
 
-    pub fn next(&mut self) -> Result<IterResult, Error> {
-        if self.pos != UNINIT_POS {
-            self.pos += 1;
-        }
-
+    pub fn init_to_ref(&mut self) -> Result<IterResult, Error> {
+        // todo: check if this works for bam files without refs in header
+        //
         if self.tid == UNINIT_TID {
             self.tid = 0;
+        } else {
+            self.tid += 1;
+        }
+
+        if self.tid >= self.header.target_count() {
+            Ok(IterResult::NoData)
+        } else {
+            self.max_pos = self.header.target_len(self.tid).context("No ref len")? as usize;
+            self.pos = UNINIT_POS;
+            self.next_pos = UNINIT_POS;
+            Ok(IterResult::Generated)
+        }
+    }
+
+    pub fn next(&mut self) -> Result<IterResult, Error> {
+        if self.pos != UNINIT_POS {
+            if self.pos >= self.max_pos {
+                return Ok(IterResult::ReferenceEnd);
+            } else {
+                self.pos += 1;
+            }
+        }
+
+        if self.rbuf.rbuf.is_empty() && self.pos != UNINIT_POS {
+            self.write_pileup_str(b'N', 0, 0, 0)?;
+            return Ok(IterResult::Generated);
         }
 
         if self.pos == self.next_pos {
             let _r = self.fill_buffer();
         }
 
-        let ref_len = self.header.target_len(self.tid).context("no ref len")? as usize;
-
-        // reached end of reference, so increment tid
-        if self.pos != UNINIT_POS && self.pos >= ref_len {
-            self.tid += 1;
-            self.pos = UNINIT_POS;
-            self.next_pos = UNINIT_POS;
-
-            if self.header.target_count() > self.tid {
-                // no more references
-                return Ok(IterResult::NoData);
-            } else {
-                // another reference left
-                return Ok(IterResult::ReferenceEnd);
-            }
-        }
-        // let _r = self.fill_buffer();
         self.set_pileup()?;
         Ok(IterResult::Generated)
     }
