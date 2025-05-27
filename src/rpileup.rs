@@ -377,14 +377,14 @@ impl PileupIterator {
             self.write_pileup_str(b'N', 0, 0, 0)?;
         }
 
-        if self.next_record.is_none() {
+        if self.next_record.is_none() && self.rbuf.rbuf.is_empty() {
             return Ok(IterResult::ReferenceEnd);
         }
 
         // if we need to print blank plps for each col,
         // advance query coord by 1
         // else, jump to the next coord with reads in range
-        if self.show_all {
+        if self.show_all || !self.rbuf.rbuf.is_empty() {
             self.pos += 1;
         } else {
             self.pos = self.next_pos;
