@@ -5,15 +5,13 @@ use num_cpus;
 use rust_htslib::bam::record::Cigar;
 use rust_htslib::bam::{ext::BamRecordExtensions, HeaderView, IndexedReader, Read, Record};
 use std::collections::VecDeque;
+use std::io::Write;
 
 const UNINIT_POS: usize = usize::MAX - 1;
 const UNINIT_TID: u32 = u32::MAX - 1;
 
 const LAST_POS: u8 = b'$';
 const FIRST_POS: u8 = b'^';
-
-const INSERTION: u8 = b'+';
-const DELETION: u8 = b'-';
 
 const F_MATCH: u8 = b'.';
 const R_MATCH: u8 = b',';
@@ -89,6 +87,16 @@ pub fn get_base_pileup(
     qual_buf.push(cur_qual);
 }
 
+pub fn write_del(pos: usize, seq_buf: &mut Vec<u8>, del_len: usize) -> Result<(), Error> {
+    write!(seq_buf, "-{}", del_len)?;
+    for _ in pos..pos + del_len {
+        seq_buf.push(b'N')
+    }
+
+    seq_buf.push(b'+');
+    Ok(())
+}
+
 pub fn cigar_get_pos(cs: &mut CigarState, pos: u32, ipos: &mut i32) -> Pileup {
     let cig = &cs.cig;
     let ncig = cig.len();
@@ -139,7 +147,7 @@ pub fn cigar_get_pos(cs: &mut CigarState, pos: u32, ipos: &mut i32) -> Pileup {
                     continue;
                 }
 
-                *ipos -= 1;
+                *ipos = -1;
                 return Pileup::Op(op);
             }
 
@@ -329,9 +337,12 @@ impl PileupIterator {
 
                 Pileup::Op(Cigar::Ins(_)) => nins += 1,
 
-                Pileup::Op(Cigar::Del(_)) => {
+                Pileup::Op(Cigar::Del(l)) => {
                     if ipos != -1 {
+                        write_del(self.pos, &mut self.seq_buf, l as usize)?;
                         ndel += 1;
+                    } else {
+                        self.seq_buf.push(b'*');
                     }
                 }
 
