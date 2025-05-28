@@ -69,10 +69,14 @@ pub fn get_base_pileup(
     }
 
     let cur_base = r.seq()[ipos];
-    let base: u8;
+
+    let mut base: u8;
 
     if ref_base != cur_base {
         base = cur_base;
+        if r.is_reverse() {
+            base.make_ascii_lowercase();
+        }
     } else {
         if r.is_reverse() {
             base = R_MATCH;
@@ -92,8 +96,6 @@ pub fn write_del(pos: usize, seq_buf: &mut Vec<u8>, del_len: usize) -> Result<()
     for _ in pos..pos + del_len {
         seq_buf.push(b'N')
     }
-
-    seq_buf.push(b'+');
     Ok(())
 }
 
@@ -147,6 +149,8 @@ pub fn cigar_get_pos(cs: &mut CigarState, pos: u32, ipos: &mut i32) -> Pileup {
                     continue;
                 }
 
+                // this coordinate comes after we already indicated the deletion, so
+                // mark ipos to avoid repeating the deletion in this and subsequent plp cols
                 *ipos = -1;
                 return Pileup::Op(op);
             }
@@ -305,7 +309,7 @@ impl PileupIterator {
 
         let mut ndel @ mut nins @ mut nbases = 0;
         let ref_base = match &self.ref_seq {
-            Some(seq) => seq[self.pos],
+            Some(seq) => seq[self.pos].to_ascii_uppercase(),
             None => b'N',
         };
 
@@ -385,8 +389,6 @@ impl PileupIterator {
             Ok(IterResult::NoData)
         } else {
             self.max_pos = self.header.target_len(self.tid).context("No ref len")? as usize;
-            // self.pos = UNINIT_POS;
-            // self.next_pos = UNINIT_POS;
             self.pos = 0;
             self.next_pos = 0;
             self.reader.fetch((self.tid, 0, u32::MAX))?;
@@ -416,10 +418,6 @@ impl PileupIterator {
         if !gen && self.show_all {
             self.write_pileup_str(b'N', 0, 0, 0)?;
         }
-
-        // if self.next_record.is_none() && self.rbuf.rbuf.is_empty() {
-        //     return Ok(IterResult::ReferenceEnd);
-        // }
 
         // if we need to print blank plps for each col,
         // advance query coord by 1
