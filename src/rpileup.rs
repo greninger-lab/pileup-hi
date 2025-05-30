@@ -1,6 +1,7 @@
 use crate::params::Params;
 use crate::pileup::CigarState;
 use crate::read_buf;
+use crate::refseq::RefSeq;
 use anyhow::{Context, Error};
 use num_cpus;
 use rust_htslib::bam::record::Cigar;
@@ -26,8 +27,8 @@ pub struct PileupIterator {
     rbuf: read_buf::ReadBuffer,
     reader: IndexedReader,
     header: HeaderView,
+    refseq: Option<RefSeq>,
     ref_seq: Option<Vec<u8>>,
-    next_record: Option<Record>,
     coverage: u32,
     seq_buf: Vec<u8>,
     qual_buf: Vec<u8>,
@@ -48,33 +49,45 @@ pub enum CigarAtPos {
     BaseEmpty(),
 }
 
-pub fn get_base_to_ref(cur_base: u8, ref_base: u8, is_reverse: bool) -> u8 {
-    let mut base: u8;
-    if ref_base != cur_base {
-        base = cur_base;
-        if is_reverse {
-            base.make_ascii_lowercase();
-        }
-    } else {
-        if is_reverse {
-            base = R_MATCH;
-        } else {
-            base = F_MATCH;
-        }
-    };
+pub fn get_base(mut cur_base: u8, is_reverse: bool) -> u8 {
+    match is_reverse {
+        false => cur_base.make_ascii_uppercase(),
+        true => cur_base.make_ascii_lowercase(),
+    }
 
-    base
+    cur_base
 }
 
-pub fn get_base_pileup(
+pub fn get_base_to_ref(
+    mut cur_base: u8,
+    ref_coord: u64,
+    refseq: Option<&RefSeq>,
+    is_reverse: bool,
+) -> Result<u8, Error> {
+    if let Some(refseq) = refseq {
+        let ref_base = refseq.get_base(ref_coord)?;
+        if ref_base == cur_base {
+            if is_reverse {
+                cur_base = R_MATCH;
+            } else {
+                cur_base = F_MATCH;
+            }
+        }
+        Ok(cur_base)
+    } else {
+        Ok(get_base(cur_base, is_reverse))
+    }
+}
+
+pub fn write_match(
     cs: &CigarState,
     r: &Record,
     ipos: u32,
     pos: usize,
     seq_buf: &mut Vec<u8>,
     qual_buf: &mut Vec<u8>,
-    ref_base: u8,
-) {
+    refseq: Option<&RefSeq>,
+) -> Result<(), Error> {
     let ipos = ipos as usize;
     let bam_pos = cs.bam_pos as usize;
 
@@ -89,12 +102,14 @@ pub fn get_base_pileup(
 
     let cur_base = r.seq()[ipos];
 
-    let base = get_base_to_ref(cur_base, ref_base, r.is_reverse());
+    let base = get_base_to_ref(cur_base, pos as u64, refseq, r.is_reverse())?;
 
     let cur_qual = r.qual()[ipos] + 33;
 
     seq_buf.push(base);
     qual_buf.push(cur_qual);
+
+    Ok(())
 }
 
 pub fn write_del(pos: usize, seq_buf: &mut Vec<u8>, del_len: usize) -> Result<(), Error> {
@@ -125,7 +140,7 @@ pub fn write_ins(
                 write!(seq_buf, "+{}", l)?;
                 let (s, e) = (ipos as usize, (ipos + l) as usize);
                 for i in s..e {
-                    let base = get_base_to_ref(r.seq()[i], b'.', r.is_reverse());
+                    let base = get_base(r.seq()[i], r.is_reverse());
                     seq_buf.push(base);
                     qual_buf.push(r.qual()[i]);
                 }
@@ -222,12 +237,16 @@ impl PileupIterator {
         let rbuf = read_buf::ReadBuffer::new();
         let header = reader.header().clone();
         let ref_seq = None;
-        let next_record = None;
         let coverage = 0;
         let show_all = params.plp.show_empty_coords;
         let remove_buf = VecDeque::with_capacity(500);
         let (seq_buf, qual_buf) = (Vec::with_capacity(500), Vec::with_capacity(500));
         let cur_rec = Record::new();
+        let mut refseq = None;
+
+        if let Some(ref_file) = params.inp.refseq {
+            refseq = Some(RefSeq::from_file(ref_file)?);
+        }
 
         Ok(Self {
             tid,
@@ -239,7 +258,7 @@ impl PileupIterator {
             header,
             ref_seq,
             show_all,
-            next_record,
+            refseq,
             coverage,
             seq_buf,
             qual_buf,
@@ -277,7 +296,6 @@ impl PileupIterator {
                 break;
             }
 
-            // scanned += 1;
             let r = &self.cur_rec;
 
             if r.is_unmapped() {
@@ -368,15 +386,15 @@ impl PileupIterator {
 
             match ret {
                 CigarAtPos::Op(Cigar::Match(_)) => {
-                    get_base_pileup(
+                    write_match(
                         &r.cstate,
                         &r.rec,
                         ipos as u32,
                         self.pos,
                         &mut self.seq_buf,
                         &mut self.qual_buf,
-                        ref_base,
-                    );
+                        self.refseq.as_ref(),
+                    )?;
 
                     nbases += 1;
                 }
@@ -441,6 +459,19 @@ impl PileupIterator {
         if self.tid >= self.header.target_count() {
             Ok(IterResult::NoData)
         } else {
+            if let Some(r) = self.refseq.as_mut() {
+                // right now we just get the entire reference sequence.
+                // Next step will be to load it in windows.
+                let tidname = std::str::from_utf8(self.header.tid2name(self.tid));
+                r.load_seq(
+                    tidname?,
+                    0,
+                    self.header
+                        .target_len(self.tid)
+                        .context("Failed to get target length")?,
+                )?
+            }
+
             self.max_pos = self.header.target_len(self.tid).context("No ref len")? as usize;
             self.pos = 0;
             self.next_pos = 0;

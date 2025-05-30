@@ -17,6 +17,9 @@ pub struct InputParams {
     #[arg(index = 1)]
     pub input: String,
 
+    #[arg(short = 'f', long = "--fasta-ref")]
+    pub refseq: Option<String>,
+
     #[arg(long = "tid")]
     pub tid: Option<u32>,
 
@@ -32,9 +35,8 @@ pub struct PileupParams {
     #[arg(long = "aa")]
     pub show_everything: bool,
     // pub min_mapq: usize,
-    //
-    #[arg(short = 'd', default_value_t = 8000)]
-    pub max_depth: usize,
+    // #[arg(short = 'd', default_value_t = 8000)]
+    // pub max_depth: usize,
     // pub remove_overlaps: bool,
     // pub count_orphans: bool,
     // pub baq: bool,
