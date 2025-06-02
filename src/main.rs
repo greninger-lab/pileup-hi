@@ -1,6 +1,5 @@
-use crate::params::Params;
+use crate::params::parse_or_quit;
 use anyhow::Error;
-use clap::Parser;
 
 mod params;
 mod pileup;
@@ -9,8 +8,8 @@ mod read_filter;
 mod refseq;
 mod rpileup;
 
-fn main() -> Result<(), Error> {
-    let params = Params::parse();
+fn _main() -> Result<(), Error> {
+    let params = parse_or_quit();
 
     let mut pileup = rpileup::PileupIterator::new(params)?;
     let mut ret: rpileup::IterResult;
@@ -31,4 +30,11 @@ fn main() -> Result<(), Error> {
     }
 
     Ok(())
+}
+
+fn main() {
+    if let Err(e) = _main() {
+        eprintln!("Error: {}", e);
+        std::process::exit(1);
+    }
 }

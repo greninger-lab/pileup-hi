@@ -12,6 +12,16 @@ pub struct Params {
     pub outp: OutputParams,
 }
 
+pub fn parse_or_quit() -> Params {
+    match Params::try_parse() {
+        Ok(p) => p,
+        Err(e) => {
+            e.print().unwrap();
+            std::process::exit(1)
+        }
+    }
+}
+
 #[derive(Parser)]
 pub struct InputParams {
     #[arg(index = 1)]

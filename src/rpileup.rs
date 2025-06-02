@@ -312,13 +312,17 @@ impl PileupIterator {
             let r = &self.cur_rec;
 
             if r.is_unmapped() {
-                self.reader.read(&mut self.cur_rec);
-                continue;
+                match self.reader.read(&mut self.cur_rec) {
+                    None => break,
+                    Some(_) => continue,
+                };
             }
 
             if !self.read_filter.check_read(&r) {
-                self.reader.read(&mut self.cur_rec);
-                continue;
+                match self.reader.read(&mut self.cur_rec) {
+                    None => break,
+                    Some(_) => continue,
+                };
             }
 
             if r.pos() < prev_pos {
