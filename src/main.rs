@@ -5,6 +5,7 @@ use clap::Parser;
 mod params;
 mod pileup;
 mod read_buf;
+mod read_filter;
 mod refseq;
 mod rpileup;
 

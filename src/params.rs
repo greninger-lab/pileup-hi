@@ -34,6 +34,15 @@ pub struct PileupParams {
 
     #[arg(long = "aa")]
     pub show_everything: bool,
+
+    #[arg(long = "--rf")]
+    pub incl_flags: Vec<String>,
+
+    #[arg(long = "--ff", default_values_t = ["BAM_FSECONDARY".to_string(), "BAM_FQCFAIL".to_string(), "BAM_FDUP".to_string()])]
+    pub excl_flags: Vec<String>,
+
+    #[arg(short = 'Q', long = "--min-BQ", default_value_t = 13)]
+    pub min_mapq: u8,
     // pub min_mapq: usize,
     // #[arg(short = 'd', default_value_t = 8000)]
     // pub max_depth: usize,

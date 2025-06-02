@@ -1,6 +1,7 @@
 use crate::params::Params;
 use crate::pileup::CigarState;
 use crate::read_buf;
+use crate::read_filter::ReadFilter;
 use crate::refseq::RefSeq;
 use anyhow::{Context, Error};
 use num_cpus;
@@ -33,6 +34,7 @@ pub struct PileupIterator {
     seq_buf: Vec<u8>,
     qual_buf: Vec<u8>,
     remove_buf: VecDeque<usize>,
+    read_filter: ReadFilter,
     cur_rec: Record,
 }
 
@@ -244,6 +246,12 @@ impl PileupIterator {
         let cur_rec = Record::new();
         let mut refseq = None;
 
+        let mut read_filter = ReadFilter::new(
+            params.plp.min_mapq,
+            params.plp.excl_flags.iter().map(|s| s.as_str()).collect(),
+            params.plp.incl_flags.iter().map(|s| s.as_str()).collect(),
+        )?;
+
         if let Some(ref_file) = params.inp.refseq {
             refseq = Some(RefSeq::from_file(ref_file)?);
         }
@@ -257,6 +265,7 @@ impl PileupIterator {
             reader,
             header,
             ref_seq,
+            read_filter,
             show_all,
             refseq,
             coverage,
@@ -299,6 +308,11 @@ impl PileupIterator {
             let r = &self.cur_rec;
 
             if r.is_unmapped() {
+                self.reader.read(&mut self.cur_rec);
+                continue;
+            }
+
+            if !self.read_filter.check_read(&r) {
                 self.reader.read(&mut self.cur_rec);
                 continue;
             }
