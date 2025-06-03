@@ -1,6 +1,7 @@
 use crate::params::parse_or_quit;
 use anyhow::Error;
 
+mod overlap;
 mod params;
 mod pileup;
 mod read_buf;
