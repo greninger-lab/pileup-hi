@@ -29,8 +29,6 @@ pub struct PileupIterator {
     reader: IndexedReader,
     header: HeaderView,
     refseq: Option<RefSeq>,
-    ref_seq: Option<Vec<u8>>,
-    coverage: u32,
     seq_buf: Vec<u8>,
     qual_buf: Vec<u8>,
     remove_buf: VecDeque<usize>,
@@ -94,10 +92,6 @@ pub fn write_match(
     let ipos = ipos as usize;
     let bam_pos = cs.bam_pos as usize;
 
-    if pos == r.reference_end() as usize - 1 {
-        seq_buf.push(LAST_POS);
-    }
-
     if pos == bam_pos {
         seq_buf.push(FIRST_POS);
         seq_buf.push(r.mapq() + 33);
@@ -107,9 +101,15 @@ pub fn write_match(
 
     let base = get_base_to_ref(cur_base, pos as u64, refseq, r.is_reverse())?;
 
+    // let cur_qual = r.qual()[ipos] + 33;
     let cur_qual = r.qual()[ipos] + 33;
 
     seq_buf.push(base);
+
+    if pos == r.reference_end() as usize - 1 {
+        seq_buf.push(LAST_POS);
+    }
+
     qual_buf.push(cur_qual);
 
     Ok(())
@@ -239,8 +239,6 @@ impl PileupIterator {
         reader.set_threads(num_cpus::get())?;
         let rbuf = read_buf::ReadBuffer::new();
         let header = reader.header().clone();
-        let ref_seq = None;
-        let coverage = 0;
         let show_all = params.plp.show_empty_coords;
         let remove_buf = VecDeque::with_capacity(500);
         let (seq_buf, qual_buf) = (Vec::with_capacity(500), Vec::with_capacity(500));
@@ -267,12 +265,10 @@ impl PileupIterator {
             rbuf,
             reader,
             header,
-            ref_seq,
             min_baseq,
             read_filter,
             show_all,
             refseq,
-            coverage,
             seq_buf,
             qual_buf,
             remove_buf,
@@ -390,21 +386,19 @@ impl PileupIterator {
         let mut generated = false;
 
         let mut ndel @ mut nins @ mut nbases = 0;
-        let ref_base = match &self.ref_seq {
-            Some(seq) => seq[self.pos].to_ascii_uppercase(),
+        let ref_base = match &self.refseq {
+            Some(seq) => seq.get_base(self.pos as u64)?,
             None => b'N',
         };
 
         for (i, r) in self.rbuf.rbuf.iter_mut().enumerate() {
             if r.rec.reference_end() - 1 < self.pos as i64 {
-                self.coverage -= 1;
                 self.remove_buf.push_back(i);
                 continue;
             }
 
             let mut ipos: i32 = -1;
             let ret = cigar_get_pos(&mut r.cstate, self.pos as u32, &mut ipos);
-            self.coverage += 1;
 
             if ipos != -1 && r.rec.qual()[ipos as usize] < self.min_baseq {
                 continue;
