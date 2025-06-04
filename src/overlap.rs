@@ -27,21 +27,27 @@ pub fn hash_qname(r: &Record) -> u64 {
 
 impl MapOverlaps for OverlapMap {
     fn push(&mut self, mut plp: PileUp) -> OverlapInsResult {
-        let r = &plp.rec;
-        if r.is_mate_unmapped() || r.is_proper_pair() {
+        let r = &mut plp.rec;
+        let h = hash_qname(r);
+
+        if r.is_mate_unmapped() || !r.is_proper_pair() {
             return OverlapInsResult::Rejected(plp);
         }
 
-        if r.mtid() != 1 && (r.mtid() != r.tid()) {
+        if r.mtid() >= 0 && (r.mtid() != r.tid()) {
             return OverlapInsResult::Rejected(plp);
         }
 
-        if r.pos() > r.mpos() || r.is_paired() && r.mpos() == -1 {
+        if let Some(mate) = self.get_mut(&h) {
+            tweak_overlap_qual(&mut mate.borrow_mut().rec, r).unwrap();
+            return OverlapInsResult::Rejected(plp);
+        }
+
+        if r.pos() < r.mpos() || (r.is_paired() && r.mpos() == -1) {
             // criteria passed, insert
-            let h = hash_qname(r);
             plp.in_overlap = true;
             let ins = Rc::new(RefCell::new(plp));
-            self.insert(h, Rc::clone(&ins)).unwrap();
+            let _ = self.insert(h, Rc::clone(&ins));
             OverlapInsResult::Inserted(ins)
         } else {
             OverlapInsResult::Rejected(plp)
@@ -109,7 +115,7 @@ pub fn tweak_overlap_qual(a: &mut Record, b: &mut Record) -> Result<(), Error> {
     // (treated the same as mismatches)
     let ap = a
         .aligned_pairs_full()
-        .map(|x| (x[0], x[1].map(|x| x as usize)));
+        .map(|x| (x[0].map(|x| x as usize), x[1]));
 
     let bp = b.aligned_pairs();
 
@@ -123,7 +129,7 @@ pub fn tweak_overlap_qual(a: &mut Record, b: &mut Record) -> Result<(), Error> {
     let bhash: HashMap<i64, usize> =
         HashMap::from_iter(bp.into_iter().map(|x| (x[1], x[0] as usize)));
 
-    for (ref_pos, read_pos) in ap {
+    for (read_pos, ref_pos) in ap {
         if let Some(rp) = ref_pos {
             // read a has a deletion relative to read b
             if read_pos.is_none() && bhash.contains_key(&rp) {
@@ -191,15 +197,17 @@ pub fn tweak_overlap_qual(a: &mut Record, b: &mut Record) -> Result<(), Error> {
                     }
                 } else {
                     // read b has a deletion relative to read a
-                    let rp = read_pos;
-                    if amul {
-                        new_qual = (a.qual()[rp] as f32 * 0.8) as u8;
-                    } else {
-                        new_qual = 0;
-                    }
+                    if let Some(_) = bhash.get(&ref_pos.unwrap()) {
+                        let rp = read_pos;
+                        if amul {
+                            new_qual = (a.qual()[rp] as f32 * 0.8) as u8;
+                        } else {
+                            new_qual = 0;
+                        }
 
-                    set_qual(b, read_pos, new_qual)?;
-                    continue;
+                        set_qual(b, read_pos, new_qual)?;
+                        continue;
+                    }
                 }
             }
         }
