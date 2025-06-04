@@ -1,10 +1,14 @@
+#![allow(dead_code)]
+use crate::overlap::{MapOverlaps, OverlapInsResult, OverlapMap};
 use crate::pileup::{cigar2rlen, CigarState, PileUp};
 use rust_htslib::bam::Record;
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 pub struct ReadBuffer {
-    pub rbuf: Vec<PileUp>,
+    pub rbuf: Vec<Rc<RefCell<PileUp>>>,
     pub len: usize,
-    pub backup_buf: Vec<PileUp>,
+    pub backup_buf: Vec<Rc<RefCell<PileUp>>>,
+    pub overlap_map: OverlapMap,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -50,28 +54,45 @@ impl ReadBuffer {
             bam_pos: r.pos() as u32,
         };
 
-        self.rbuf.push(PileUp {
+        let plp = PileUp {
             rec: r.clone(),
-            indel: 0,
             cstate,
-        });
+            in_overlap: false,
+        };
+
+        match self.overlap_map.push(plp) {
+            OverlapInsResult::Inserted(plp_ref) => self.rbuf.push(plp_ref),
+
+            OverlapInsResult::Rejected(plp_obj) => self.rbuf.push(Rc::new(RefCell::new(plp_obj))),
+        }
+
+        // self.rbuf.push(PileUp {
+        //     rec: r.clone(),
+        //     indel: 0,
+        //     cstate,
+        // });
         BufPushResult::Pushed
     }
 
     pub fn new() -> Self {
-        let rbuf: Vec<PileUp> = Vec::with_capacity(500);
-        let backup_buf: Vec<PileUp> = Vec::with_capacity(500);
+        let rbuf: Vec<Rc<RefCell<PileUp>>> = Vec::with_capacity(500);
+        let backup_buf: Vec<Rc<RefCell<PileUp>>> = Vec::with_capacity(500);
+        let overlap_map = HashMap::new();
         let len = 0;
 
         Self {
             rbuf,
             backup_buf,
+            overlap_map,
             len,
         }
     }
 
-    pub fn reset(&mut self) {
+    pub fn reset(&mut self, del_hashes: Vec<u64>) {
         assert!(self.rbuf.is_empty());
         std::mem::swap(&mut self.rbuf, &mut self.backup_buf);
+        for d in del_hashes {
+            self.overlap_map.delete_hash(d);
+        }
     }
 }

@@ -1,3 +1,4 @@
+use crate::overlap::hash_qname;
 use crate::params::Params;
 use crate::pileup::CigarState;
 use crate::read_buf;
@@ -8,6 +9,7 @@ use num_cpus;
 use rust_htslib::bam::record::Cigar;
 use rust_htslib::bam::{ext::BamRecordExtensions, HeaderView, IndexedReader, Read, Record};
 use std::io::Write;
+use std::rc::Rc;
 
 const UNINIT_POS: usize = usize::MAX - 1;
 const UNINIT_TID: u32 = u32::MAX - 1;
@@ -379,6 +381,7 @@ impl PileupIterator {
     pub fn set_pileup(&mut self) -> Result<bool, Error> {
         assert!(self.rbuf.backup_buf.is_empty());
         let mut generated = false;
+        let mut h: Vec<u64> = Vec::new();
 
         let mut ndel @ mut nins @ mut nbases = 0;
         let ref_base = match &self.refseq {
@@ -386,8 +389,13 @@ impl PileupIterator {
             None => b'N',
         };
 
-        for mut r in self.rbuf.rbuf.drain(..) {
+        for raw in self.rbuf.rbuf.drain(..) {
+            let mut r = raw.borrow_mut();
+
             if r.rec.reference_end() - 1 < self.pos as i64 {
+                if r.in_overlap {
+                    h.push(hash_qname(&r.rec))
+                }
                 continue;
             }
 
@@ -395,7 +403,7 @@ impl PileupIterator {
             let ret = cigar_get_pos(&mut r.cstate, self.pos as u32, &mut ipos);
 
             if ipos != -1 && r.rec.qual()[ipos as usize] < self.min_baseq {
-                self.rbuf.backup_buf.push(r);
+                self.rbuf.backup_buf.push(Rc::clone(&raw));
                 continue;
             }
 
@@ -414,9 +422,8 @@ impl PileupIterator {
                     nbases += 1;
                 }
 
-                CigarAtPos::Op(Cigar::Ins(l)) => {
+                CigarAtPos::Op(Cigar::Ins(_)) => {
                     nins += 1;
-                    r.indel += l;
                     write_ins(
                         &r.cstate,
                         &r.rec,
@@ -429,7 +436,6 @@ impl PileupIterator {
                 CigarAtPos::Op(Cigar::Del(l)) => {
                     if ipos != -1 {
                         write_del(self.pos, &mut self.seq_buf, l as usize)?;
-                        r.indel -= l;
                     } else {
                         self.seq_buf.push(b'*');
                     }
@@ -449,7 +455,7 @@ impl PileupIterator {
                 _ => panic!(),
             }
 
-            self.rbuf.backup_buf.push(r);
+            self.rbuf.backup_buf.push(Rc::clone(&raw));
         }
 
         if nbases + nins + ndel > 0 {
@@ -457,7 +463,7 @@ impl PileupIterator {
             generated = true;
         }
 
-        self.rbuf.reset();
+        self.rbuf.reset(h);
 
         Ok(generated)
     }

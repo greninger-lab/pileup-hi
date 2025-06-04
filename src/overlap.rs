@@ -1,44 +1,55 @@
 #![allow(dead_code)]
+use crate::pileup::PileUp;
 use anyhow::Error;
 use rust_htslib::bam::{ext::BamRecordExtensions, Record};
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::slice;
+use std::{cell::RefCell, rc::Rc};
 
-pub type OverlapMap = HashMap<u64, Record>;
+pub type OverlapMap = HashMap<u64, Rc<RefCell<PileUp>>>;
 
 pub trait MapOverlaps {
-    fn push(&mut self, r: Record) -> Option<Record>;
-    fn remove(&mut self, r: &Record);
+    fn push(&mut self, r: PileUp) -> OverlapInsResult;
+    fn delete_hash(&mut self, r: u64);
+}
+
+pub enum OverlapInsResult {
+    Inserted(Rc<RefCell<PileUp>>),
+    Rejected(PileUp),
+}
+
+pub fn hash_qname(r: &Record) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    r.qname().hash(&mut hasher);
+    hasher.finish()
 }
 
 impl MapOverlaps for OverlapMap {
-    fn push(&mut self, r: Record) -> Option<Record> {
+    fn push(&mut self, mut plp: PileUp) -> OverlapInsResult {
+        let r = &plp.rec;
         if r.is_mate_unmapped() || r.is_proper_pair() {
-            return Some(r);
+            return OverlapInsResult::Rejected(plp);
         }
 
         if r.mtid() != 1 && (r.mtid() != r.tid()) {
-            return Some(r);
+            return OverlapInsResult::Rejected(plp);
         }
 
         if r.pos() > r.mpos() || r.is_paired() && r.mpos() == -1 {
             // criteria passed, insert
-            let mut hasher = DefaultHasher::new();
-            r.qname().hash(&mut hasher);
-            let h = hasher.finish();
-            self.insert(h, r).unwrap();
-            None
+            let h = hash_qname(r);
+            plp.in_overlap = true;
+            let ins = Rc::new(RefCell::new(plp));
+            self.insert(h, Rc::clone(&ins)).unwrap();
+            OverlapInsResult::Inserted(ins)
         } else {
-            Some(r)
+            OverlapInsResult::Rejected(plp)
         }
     }
 
-    fn remove(&mut self, r: &Record) {
-        let mut hasher = DefaultHasher::new();
-        r.qname().hash(&mut hasher);
-        let h = hasher.finish();
-        self.remove(&h);
+    fn delete_hash(&mut self, r: u64) {
+        self.remove(&r);
     }
 }
 

@@ -7,7 +7,7 @@ pub struct RefSeq {
     wstart: u64,
     wend: u64,
     seq: Vec<u8>,
-    file: String,
+    // file: String,
     reader: fasta::IndexedReader<File>,
 }
 
@@ -33,7 +33,6 @@ impl RefSeq {
             wstart,
             wend,
             seq,
-            file,
             reader,
         })
     }
