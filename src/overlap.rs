@@ -41,8 +41,8 @@ impl CigarWalker {
             ins_remaining: 0,
             match_remaining: 0,
             refskip_remaining: 0,
-            ref_pos: r.pos(),
-            read_pos: 0,
+            ref_pos: r.pos() - 1,
+            read_pos: usize::MAX,
             cigar: r.cigar().take().0,
             cigar_index: 0,
             in_del: false,
@@ -50,10 +50,13 @@ impl CigarWalker {
     }
 
     pub fn move_to_next_match(&mut self) -> Option<Cigar> {
-        if self.match_remaining > 0 {
-            self.match_remaining -= 1;
-            return Some(Cigar::Match(1)); // already in match block
-        }
+        // if self.match_remaining > 0 {
+        //     self.match_remaining -= 1;
+        //     self.read_pos -= 1;
+        //     self.
+
+        //     return Some(Cigar::Match(1)); // already in match block
+        // }
 
         let mut ret: Option<Cigar>;
         loop {
@@ -119,7 +122,8 @@ impl Iterator for CigarWalker {
             match entry {
                 Cigar::Match(len) | Cigar::Equal(len) | Cigar::Diff(len) => {
                     self.in_del = false;
-                    self.read_pos += 1;
+                    // self.read_pos += 1;
+                    self.read_pos = self.read_pos.wrapping_add(1);
                     self.ref_pos += 1;
                     self.match_remaining = len - 1;
                     self.cigar_index += 1;
@@ -237,6 +241,7 @@ pub fn tweak_overlap_qual(a: &mut Record, b: &mut Record) -> Result<(), Error> {
 
     // we assume that we encounter reads in order (e.g coord-sorted).
     assert!(a.pos() <= b.pos());
+    // println! {"==============================="}
 
     let mut a_iter = CigarWalker::new(&a);
     let mut b_iter = CigarWalker::new(&b);
@@ -246,104 +251,127 @@ pub fn tweak_overlap_qual(a: &mut Record, b: &mut Record) -> Result<(), Error> {
         false => (false, true),
     };
 
+    while a_iter.ref_pos != b_iter.ref_pos {
+        match a_iter.next() {
+            None => break,
+            _ => (),
+        };
+    }
+
     loop {
         ret_a = a_iter.move_to_next_match();
+        // println! {"A: {}", a_iter.read_pos}
         match ret_a {
             None => break,
             _ => (),
         }
 
         ret_b = b_iter.move_to_next_match();
+        // println! {"B: {}", b_iter.read_pos}
         match ret_b {
             None => break,
             _ => (),
         }
 
-        println! {"{} {} {} {}", a_iter.ref_pos, a_iter.match_remaining, b_iter.ref_pos, b_iter.match_remaining}
+        // println! {"{} {}", a_iter.ref_pos, b_iter.ref_pos}
 
         if a_iter.ref_pos != b_iter.ref_pos {
             // del in read B
             if a_iter.ref_pos < b_iter.ref_pos {
                 while a_iter.ref_pos < b_iter.ref_pos {
-                    println! {"DEL {} {}", a_iter.ref_pos, b_iter.ref_pos}
                     let new_qual = match amul {
                         true => (a.qual()[a_iter.read_pos] as f32 * 0.8) as u8,
                         false => 0,
                     };
+                    // println! {"del in read b: B: {}", b_iter.read_pos}
                     set_qual(a, a_iter.read_pos, new_qual)?;
-                    if a_iter.next().is_none() {
+                    // println! {"adjusted qual at A {} to {}", a_iter.read_pos, new_qual}
+                    if !matches!(a_iter.next(), Some(Cigar::Match(_))) {
                         break;
                     }
+                    // if a_iter.next().is_none() {
+                    //     break;
+                    // }
                 }
+                // a_iter.next();
             }
 
             // del in read A
             if b_iter.ref_pos < a_iter.ref_pos {
                 while b_iter.ref_pos < a_iter.ref_pos {
-                    println! {"DEL {} {}", a_iter.ref_pos, b_iter.ref_pos}
                     new_qual = match bmul {
                         true => (b.qual()[b_iter.read_pos] as f32 * 0.8) as u8,
                         false => 0,
                     };
+                    // println! {"del in read a: A: {}", a_iter.read_pos}
                     set_qual(b, b_iter.read_pos, new_qual)?;
-                    if b_iter.next().is_none() {
+                    // println! {"adjusted qual at B {} to {}", b_iter.read_pos, new_qual}
+                    if !matches!(b_iter.next(), Some(Cigar::Match(_))) {
                         break;
                     }
                 }
+                // b_iter.next();
             }
+        }
 
-            // assert_eq!(a_iter.ref_pos, b_iter.ref_pos);
+        if a_iter.ref_pos != b_iter.ref_pos {
+            continue;
+        }
 
-            // read does not match
-            if a.seq()[a_iter.read_pos] != b.seq()[b_iter.read_pos] {
-                match a.qual()[a_iter.read_pos].cmp(&b.qual()[b_iter.read_pos]) {
-                    Ordering::Greater => {
-                        new_qual = (a.qual()[a_iter.read_pos] as f32 * 0.8) as u8;
-                        set_qual(a, a_iter.read_pos, new_qual)?;
-                        set_qual(b, b_iter.read_pos, 0)?;
-                    }
-                    Ordering::Less => {
-                        new_qual = (b.qual()[b_iter.read_pos] as f32 * 0.8) as u8;
-                        set_qual(a, a_iter.read_pos, 0)?;
-                        set_qual(b, b_iter.read_pos, new_qual)?;
-                    }
-                    Ordering::Equal => match amul {
-                        true => {
-                            new_qual = (a.qual()[a_iter.read_pos] as f32 * 0.8) as u8;
-                            set_qual(a, a_iter.read_pos, new_qual)?;
-                            set_qual(b, b_iter.read_pos, 0)?;
-                        }
+        // println! {"POS AFTER DELETION CORRECTION: {} {}", a_iter.ref_pos, b_iter.ref_pos}
+        assert_eq!(
+            a_iter.ref_pos,
+            b_iter.ref_pos,
+            "{}->{} {}->{}",
+            a.pos(),
+            a.cigar(),
+            b.pos(),
+            b.cigar()
+        );
 
-                        false => {
-                            new_qual = (b.qual()[b_iter.read_pos] as f32 * 0.8) as u8;
-                            set_qual(a, a_iter.read_pos, 0)?;
-                            set_qual(b, b_iter.read_pos, new_qual)?;
-                        }
-                    },
+        // read does not match
+        if a.seq()[a_iter.read_pos] != b.seq()[b_iter.read_pos] {
+            // println! {"mismatch REF: {} {} READ: {} {}", a_iter.ref_pos, b_iter.ref_pos, a_iter.read_pos, b_iter.read_pos}
+            match a.qual()[a_iter.read_pos].cmp(&b.qual()[b_iter.read_pos]) {
+                Ordering::Greater => {
+                    new_qual = (a.qual()[a_iter.read_pos] as f32 * 0.8) as u8;
+                    set_qual(a, a_iter.read_pos, new_qual)?;
+                    set_qual(b, b_iter.read_pos, 0)?;
                 }
-            } else {
-                new_qual = (a.seq()[a_iter.read_pos] + b.seq()[b_iter.read_pos]).min(200);
-                match amul {
+                Ordering::Less => {
+                    new_qual = (b.qual()[b_iter.read_pos] as f32 * 0.8) as u8;
+                    set_qual(a, a_iter.read_pos, 0)?;
+                    set_qual(b, b_iter.read_pos, new_qual)?;
+                }
+                Ordering::Equal => match amul {
                     true => {
+                        new_qual = (a.qual()[a_iter.read_pos] as f32 * 0.8) as u8;
                         set_qual(a, a_iter.read_pos, new_qual)?;
                         set_qual(b, b_iter.read_pos, 0)?;
                     }
 
                     false => {
+                        new_qual = (b.qual()[b_iter.read_pos] as f32 * 0.8) as u8;
                         set_qual(a, a_iter.read_pos, 0)?;
                         set_qual(b, b_iter.read_pos, new_qual)?;
                     }
+                },
+            }
+        } else {
+            // println! {"match REF: {} {} READ: {} {}", a_iter.ref_pos, b_iter.ref_pos, a_iter.read_pos, b_iter.read_pos}
+            new_qual = (a.qual()[a_iter.read_pos] + b.qual()[b_iter.read_pos]).min(200);
+            match amul {
+                true => {
+                    set_qual(a, a_iter.read_pos, new_qual)?;
+                    set_qual(b, b_iter.read_pos, 0)?;
+                }
+
+                false => {
+                    set_qual(a, a_iter.read_pos, 0)?;
+                    set_qual(b, b_iter.read_pos, new_qual)?;
                 }
             }
         }
-
-        if a_iter.next().is_none() {
-            break;
-        }
-
-        if b_iter.next().is_none() {
-            break;
-        };
     }
 
     Ok(())
@@ -353,6 +381,10 @@ pub fn tweak_overlap_qual(a: &mut Record, b: &mut Record) -> Result<(), Error> {
 mod tests {
     use super::*;
     use rust_htslib::bam::record::{Cigar, CigarString};
+
+    const E_ADJ: u8 = (b'E' as f32 * 0.8) as u8;
+    const E_CONF: u8 = b'E' * 2;
+    const HASH_ADJ: u8 = (b'#' as f32 * 0.8) as u8;
 
     #[test]
     pub fn qual_set_test1() {
@@ -438,16 +470,16 @@ mod tests {
 
         tweak_overlap_qual(&mut a, &mut b).unwrap();
 
-        let exp_qual_4 = (b'#' as f32 * 0.8) as u8;
+        // let exp_qual_4 = (b'#' as f32 * 0.8) as u8;
         assert_eq!(a.qual()[4], 0, "{} {}", a.qual()[4], b.qual()[4]);
-        assert_eq!(b.qual()[4], exp_qual_4);
+        assert_eq!(b.qual()[4], HASH_ADJ);
 
-        let exp_qual_0 = (b'E' as f32 * 0.8) as u8;
+        // let exp_qual_0 = (b'E' as f32 * 0.8) as u8;
         assert_eq!(a.qual()[0], 0);
-        assert_eq!(b.qual()[0], exp_qual_0);
+        assert_eq!(b.qual()[0], E_ADJ);
 
-        let exp_qual_8 = (b'E' as f32 * 0.8) as u8;
-        assert_eq!(b.qual()[9], exp_qual_8);
+        // let exp_qual_8 = (b'E' as f32 * 0.8) as u8;
+        assert_eq!(b.qual()[9], E_ADJ);
         assert_eq!(a.qual()[8], 0);
     }
 
@@ -482,16 +514,75 @@ mod tests {
         tweak_overlap_qual(&mut a, &mut b).unwrap();
 
         // check deletion here...
-        let exp_qual_4 = (b'#' as f32 * 0.8) as u8;
+        // let exp_qual_4 = (b'#' as f32 * 0.8) as u8;
         assert_eq!(a.qual()[4], 0);
-        assert_eq!(b.qual()[4], exp_qual_4);
+        assert_eq!(b.qual()[4], HASH_ADJ);
 
-        let exp_qual_0 = (b'E' as f32 * 0.8) as u8;
+        // let exp_qual_0 = (b'E' as f32 * 0.8) as u8;
         assert_eq!(a.qual()[0], 0);
-        assert_eq!(b.qual()[0], exp_qual_0);
+        assert_eq!(b.qual()[0], E_ADJ);
 
-        let exp_qual_8 = (b'E' as f32 * 0.8) as u8;
-        assert_eq!(b.qual()[9], exp_qual_8);
+        // let exp_qual_8 = (b'E' as f32 * 0.8) as u8;
+        assert_eq!(b.qual()[9], E_ADJ);
         assert_eq!(a.qual()[7], 0);
+    }
+
+    #[test]
+    // now test with ref offset of 2
+    pub fn test_overlap_tweak3() {
+        let mut a = Record::new();
+
+        a.set(
+            b"read1",
+            Some(&CigarString(vec![
+                Cigar::Match(6),
+                Cigar::Del(1),
+                Cigar::Match(4),
+            ])),
+            b"GCTGCAGTAT",
+            b"EEEEEEEEEE",
+            // b"read1",
+            // Some(&CigarString(vec![
+            //     Cigar::Match(2),
+            //     Cigar::Del(1),
+            //     Cigar::Match(3),
+            //     Cigar::Del(2),
+            //     Cigar::Match(1),
+            // ])),
+            // b"TGAGGT",
+            // b"EEEEEE",
+        );
+
+        a.set_pos(1);
+
+        let mut b = Record::new();
+        b.set(
+            b"read1",
+            Some(&CigarString(vec![
+                Cigar::Match(2),
+                Cigar::Del(1),
+                Cigar::Match(3),
+                Cigar::Del(2),
+                Cigar::Match(1),
+            ])),
+            b"TGAGGT",
+            b"EEEEEE",
+        );
+
+        b.set_pos(3);
+
+        tweak_overlap_qual(&mut a, &mut b).unwrap();
+
+        // check deletion here...
+        assert_eq!(b.qual()[0], E_CONF);
+        assert_eq!(a.qual()[0], b'E');
+
+        // first set of deletions
+        assert_eq!(a.qual()[3], E_ADJ);
+        assert_eq!(b.qual()[4], E_CONF);
+
+        // second set of deletions
+        assert_eq!(b.qual()[8], E_ADJ);
+        assert_eq!(b.qual()[9], E_ADJ);
     }
 }

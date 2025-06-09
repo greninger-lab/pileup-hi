@@ -67,7 +67,6 @@ pub fn get_base_to_ref(
         let ref_base = refseq.get_base(ref_coord)?;
         if ref_base == cur_base {
             if is_reverse {
-                // cur_base = R_MATCH;
                 Ok(R_MATCH)
             } else {
                 Ok(F_MATCH)
