@@ -58,15 +58,15 @@ pub fn get_base(mut cur_base: u8, is_reverse: bool) -> u8 {
 }
 
 // cap qualitites at max of 126; this also helps avoid non-ascii output
-pub fn get_qual(mut qual: u8) -> u8 {
-    match qual.cmp(&93).is_gt() {
+pub fn get_qual(qual: u8) -> u8 {
+    match qual.cmp(&92).is_gt() {
         true => 126,
         false => qual + 33,
     }
 }
 
 pub fn get_base_to_ref(
-    mut cur_base: u8,
+    cur_base: u8,
     ref_coord: u64,
     refseq: Option<&RefSeq>,
     is_reverse: bool,
@@ -75,7 +75,6 @@ pub fn get_base_to_ref(
         let ref_base = refseq.get_base(ref_coord)?;
         if ref_base == cur_base {
             if is_reverse {
-                // cur_base = R_MATCH;
                 Ok(R_MATCH)
             } else {
                 Ok(F_MATCH)
@@ -97,21 +96,19 @@ pub fn write_match(
     qual_buf: &mut Vec<u8>,
     refseq: Option<&RefSeq>,
 ) -> Result<(), Error> {
-    // assert_ne!(ipos, -1);
     let ipos = ipos as usize;
-    // let bam_pos = cs.bam_pos as usize;
     let bam_pos = r.pos() as usize;
 
     if pos == bam_pos {
         seq_buf.push(FIRST_POS);
-        seq_buf.push(r.mapq() + 33);
+        seq_buf.push(get_qual(r.mapq()));
     }
 
     let cur_base = r.seq()[ipos];
 
     let base = get_base_to_ref(cur_base, pos as u64, refseq, r.is_reverse())?;
 
-    let cur_qual = r.qual()[ipos] + 33;
+    let cur_qual = r.qual()[ipos];
 
     seq_buf.push(base);
 
@@ -265,7 +262,7 @@ impl PileupIterator {
         let pos @ next_pos @ max_pos = params.inp.pos.unwrap_or(UNINIT_POS);
         let mut reader = IndexedReader::from_path(params.inp.input)?;
         reader.set_threads(num_cpus::get())?;
-        let rbuf = read_buf::ReadBuffer::new();
+        let rbuf = read_buf::ReadBuffer::new(params.inp.depth);
         let header = reader.header().clone();
         let show_all = params.plp.show_empty_coords;
         let (seq_buf, qual_buf) = (Vec::with_capacity(500), Vec::with_capacity(500));
@@ -373,12 +370,11 @@ impl PileupIterator {
                 read_buf::BufPushResult::DifferentReference => {
                     break;
                 }
-                read_buf::BufPushResult::Pushed => {
+                read_buf::BufPushResult::Pushed | read_buf::BufPushResult::MaxDepthMet => {
                     self.cur_rec.set_tid(-1);
                     match self.reader.read(&mut self.cur_rec) {
                         Some(Ok(_)) => continue,
                         None => {
-                            // self.pos = self.max_pos;
                             self.cur_rec.set_tid(-1);
                             break;
                         }
@@ -434,6 +430,7 @@ impl PileupIterator {
             if r.rec.reference_end() - 1 < self.pos as i64 {
                 drop(r);
                 drop(raw);
+                self.rbuf.depth -= 1;
                 continue;
             }
 
@@ -491,7 +488,7 @@ impl PileupIterator {
                         )?
                     } else {
                         self.seq_buf.push(b'*');
-                        self.qual_buf.push(r.rec.qual()[r.cstate.qpos])
+                        self.qual_buf.push(get_qual(r.rec.qual()[r.cstate.qpos]))
                     }
                     ndel += 1;
                 }

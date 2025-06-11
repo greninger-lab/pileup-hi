@@ -35,6 +35,9 @@ pub struct InputParams {
 
     #[arg(long = "pos")]
     pub pos: Option<usize>,
+
+    #[arg(short = 'd', long = "depth", default_value_t = 8000)]
+    pub depth: usize,
 }
 
 #[derive(Parser)]
@@ -62,10 +65,6 @@ pub struct PileupParams {
 
     #[arg(short = 'x', long = "disable_overlap_removal")]
     pub disable_overlap: bool,
-    // pub min_mapq: usize,
-    // #[arg(short = 'd', default_value_t = 8000)]
-    // pub max_depth: usize, pub remove_overlaps: bool,
-    // pub count_orphans: bool,
     // pub baq: bool,
 }
 

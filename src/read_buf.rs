@@ -9,6 +9,8 @@ pub struct ReadBuffer {
     pub len: usize,
     pub backup_buf: Vec<Rc<RefCell<PileUp>>>,
     pub overlap_map: OverlapMap,
+    pub depth: usize,
+    pub max_depth: usize,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -17,6 +19,7 @@ pub enum BufPushResult {
     Pushed,
     DifferentReference,
     Unmapped,
+    MaxDepthMet,
 }
 
 impl ReadBuffer {
@@ -47,6 +50,10 @@ impl ReadBuffer {
             return BufPushResult::AfterWindow(window_start);
         }
 
+        if self.depth >= self.max_depth {
+            return BufPushResult::MaxDepthMet;
+        }
+
         let cstate = CigarState {
             cig: r.cigar(),
             icig: 0,
@@ -65,14 +72,16 @@ impl ReadBuffer {
 
         self.overlap_map.push(Rc::clone(&plp_ref));
         self.rbuf.push(plp_ref);
+        self.depth += 1;
 
         BufPushResult::Pushed
     }
 
-    pub fn new() -> Self {
+    pub fn new(depth: usize) -> Self {
         let rbuf: Vec<Rc<RefCell<PileUp>>> = Vec::with_capacity(500);
         let backup_buf: Vec<Rc<RefCell<PileUp>>> = Vec::with_capacity(500);
         let overlap_map = HashMap::new();
+        let max_depth = depth.cmp(&0).is_eq().then_some(usize::MAX).unwrap_or(depth);
         let len = 0;
 
         Self {
@@ -80,6 +89,8 @@ impl ReadBuffer {
             backup_buf,
             overlap_map,
             len,
+            depth: 0,
+            max_depth,
         }
     }
 
