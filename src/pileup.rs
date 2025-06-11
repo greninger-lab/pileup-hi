@@ -15,7 +15,6 @@ pub struct CigarState {
 pub struct PileUp {
     pub rec: Record,
     pub cstate: CigarState,
-    pub in_overlap: bool,
 }
 
 pub fn cigar2rlen(r: &Record) -> usize {

@@ -77,11 +77,14 @@ pub fn set_qual(r: &mut Record, idx: usize, qual: u8) -> Result<(), Error> {
 // we just combine the two rounds of hashing and return true/false based on first bit
 // of hashed value.
 pub fn decide_which_read(chars: &[u8]) -> bool {
-    let chars = chars.into_iter();
-    let mut h = 0u32;
-    for c in chars {
-        h = (h << 5) - (h) + *c as u32;
+    let mut h = chars[0] as u32;
+
+    if h > 0 {
+        for c in &chars[1..] {
+            h = (h << 5) - (h) + *c as u32;
+        }
     }
+
     h += !(h << 15);
     h ^= h >> 10;
     h += h << 3;

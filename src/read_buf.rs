@@ -59,7 +59,6 @@ impl ReadBuffer {
         let plp = PileUp {
             rec: r.clone(),
             cstate,
-            in_overlap: false,
         };
 
         let plp_ref = Rc::new(RefCell::new(plp));

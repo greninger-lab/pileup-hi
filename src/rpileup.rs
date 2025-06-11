@@ -128,8 +128,12 @@ pub fn write_del(
 ) -> Result<(), Error> {
     write_match(cs, r, ipos, pos, seq_buf, qual_buf, refseq)?;
     write!(seq_buf, "-{}", del_len)?;
-    for _ in pos..pos + del_len {
-        seq_buf.push(b'N')
+    for p in pos + 1..pos + del_len + 1 {
+        let b = match refseq {
+            Some(refseq) => get_base(refseq.get_base(p as u64)?, r.is_reverse()),
+            None => b'N',
+        };
+        seq_buf.push(b);
     }
     Ok(())
 }
@@ -155,11 +159,10 @@ pub fn write_ins(
 
             Cigar::Ins(l) => {
                 write!(seq_buf, "+{}", l)?;
-                let (s, e) = (ipos as usize, (ipos + l) as usize);
+                let (s, e) = ((ipos + 1) as usize, (ipos + 1 + l) as usize);
                 for i in s..e {
                     let base = get_base(r.seq()[i], r.is_reverse());
                     seq_buf.push(base);
-                    qual_buf.push(r.qual()[i] + 33);
                 }
             }
 
@@ -396,9 +399,9 @@ impl PileupIterator {
         }
 
         if self.qual_buf.is_empty() {
-            print! {"*\t"}
+            print! {"*"}
         } else {
-            print! {"{}\t", std::str::from_utf8(&self.qual_buf)?}
+            print! {"{}", std::str::from_utf8(&self.qual_buf)?}
             self.qual_buf.clear();
         }
 
@@ -417,7 +420,6 @@ impl PileupIterator {
             None => b'N',
         };
 
-        let mut cnt = 0;
         for raw in self.rbuf.rbuf.drain(..) {
             let mut r = raw.borrow_mut();
 
@@ -430,7 +432,6 @@ impl PileupIterator {
             let ret = cigar_get_pos(&mut r.cstate, self.pos as u32);
 
             if r.rec.qual()[r.cstate.qpos] < self.min_baseq {
-                // if rqual < self.min_baseq {
                 drop(r);
                 self.rbuf.backup_buf.push(raw);
                 continue;
@@ -482,6 +483,7 @@ impl PileupIterator {
                         )?
                     } else {
                         self.seq_buf.push(b'*');
+                        self.qual_buf.push(r.rec.qual()[r.cstate.qpos])
                     }
                     ndel += 1;
                 }
