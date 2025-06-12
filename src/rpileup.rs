@@ -261,7 +261,7 @@ impl PileupIterator {
         let pos @ next_pos @ max_pos = params.inp.pos.unwrap_or(UNINIT_POS);
         let mut reader = IndexedReader::from_path(params.inp.input)?;
         reader.set_threads(num_cpus::get())?;
-        let rbuf = read_buf::ReadBuffer::new(params.inp.depth);
+        let rbuf = read_buf::ReadBuffer::new(params.inp.depth, params.plp.disable_overlaps);
         let header = reader.header().clone();
         let show_all = params.plp.show_empty_coords;
         let (seq_buf, qual_buf) = (Vec::with_capacity(500), Vec::with_capacity(500));

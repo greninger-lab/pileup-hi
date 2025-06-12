@@ -48,6 +48,9 @@ pub struct PileupParams {
     #[arg(long = "aa")]
     pub show_everything: bool,
 
+    #[arg(short = 'x')]
+    pub disable_overlaps: bool,
+
     #[arg(short = 'A')]
     pub count_orphans: bool,
 
