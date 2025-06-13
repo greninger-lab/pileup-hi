@@ -12,6 +12,7 @@ pub type OverlapMap = HashMap<u64, Rc<RefCell<PileUp>>>;
 pub trait MapOverlaps {
     fn push(&mut self, r: Rc<RefCell<PileUp>>);
     fn delete_hash(&mut self, r: u64);
+    fn delete_read(&mut self, r: &Record);
 }
 
 pub fn hash_qname(r: &Record) -> u64 {
@@ -48,6 +49,12 @@ impl MapOverlaps for OverlapMap {
 
     fn delete_hash(&mut self, r: u64) {
         self.remove(&r);
+    }
+
+    fn delete_read(&mut self, r: &Record) {
+        let mut h = DefaultHasher::new();
+        r.qname().hash(&mut h);
+        self.remove(&h.finish());
     }
 }
 

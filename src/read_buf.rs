@@ -6,7 +6,7 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 pub struct ReadBuffer {
     pub rbuf: Vec<Rc<RefCell<PileUp>>>,
-    pub len: usize,
+    pub len: i64,
     pub backup_buf: Vec<Rc<RefCell<PileUp>>>,
     pub overlap_map: Option<OverlapMap>,
     pub depth: usize,
@@ -23,17 +23,12 @@ pub enum BufPushResult {
 }
 
 impl ReadBuffer {
-    pub fn c_to_next_window(&mut self, next_pos: i64, cur_pos: usize) -> usize {
-        let next_pos = next_pos as usize;
-        std::cmp::max(0, next_pos - (cur_pos + self.len - 1))
-    }
-
-    pub fn attempt_push(&mut self, r: &Record, pos: usize, tid: u32) -> BufPushResult {
+    pub fn attempt_push(&mut self, r: &Record, pos: i64, tid: i32) -> BufPushResult {
         if r.is_unmapped() {
             return BufPushResult::Unmapped;
         }
 
-        if r.tid() as u32 != tid {
+        if r.tid() != tid {
             return BufPushResult::DifferentReference;
         }
 
@@ -41,11 +36,14 @@ impl ReadBuffer {
             self.len = cigar2rlen(&r);
         }
 
-        if r.pos() as usize + self.len - 1 < pos {
+        if r.pos() + self.len - 1 < pos {
             panic!(); // unsorted
         }
 
-        if self.depth >= self.max_depth {
+        if r.tid() == tid && r.pos() == pos && self.depth >= self.max_depth {
+            if let Some(ov) = &mut self.overlap_map {
+                ov.delete_read(r);
+            }
             return BufPushResult::MaxDepthMet;
         }
 

@@ -17,7 +17,7 @@ pub struct PileUp {
     pub cstate: CigarState,
 }
 
-pub fn cigar2rlen(r: &Record) -> usize {
+pub fn cigar2rlen(r: &Record) -> i64 {
     let mut len = 0;
     for op in &r.cigar() {
         match op {
@@ -30,5 +30,5 @@ pub fn cigar2rlen(r: &Record) -> usize {
         }
     }
 
-    len as usize
+    len as i64
 }

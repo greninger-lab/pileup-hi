@@ -9,8 +9,8 @@ use rust_htslib::bam::record::Cigar;
 use rust_htslib::bam::{ext::BamRecordExtensions, HeaderView, IndexedReader, Read, Record};
 use std::io::Write;
 
-const UNINIT_POS: usize = usize::MAX - 1;
-const UNINIT_TID: u32 = u32::MAX - 1;
+const UNINIT_POS: i64 = i64::MAX - 1;
+const UNINIT_TID: i32 = i32::MAX - 1;
 
 const LAST_POS: u8 = b'$';
 const FIRST_POS: u8 = b'^';
@@ -19,11 +19,11 @@ const F_MATCH: u8 = b'.';
 const R_MATCH: u8 = b',';
 
 pub struct PileupIterator {
-    tid: u32,
-    pos: usize,
-    next_pos: usize,
-    max_pos: usize,
-    tid_count: u32,
+    tid: i32,
+    pos: i64,
+    next_pos: i64,
+    max_pos: i64,
+    tid_count: i32,
     show_all: bool,
     rbuf: read_buf::ReadBuffer,
     reader: IndexedReader,
@@ -92,13 +92,13 @@ pub fn write_match(
     _cs: &CigarState,
     r: &Record,
     ipos: u32,
-    pos: usize,
+    pos: i64,
     seq_buf: &mut Vec<u8>,
     qual_buf: &mut Vec<u8>,
     refseq: Option<&RefSeq>,
 ) -> Result<(), Error> {
     let ipos = ipos as usize;
-    let bam_pos = r.pos() as usize;
+    let bam_pos = r.pos();
 
     if pos == bam_pos {
         seq_buf.push(FIRST_POS);
@@ -113,7 +113,7 @@ pub fn write_match(
 
     seq_buf.push(base);
 
-    if pos == r.reference_end() as usize - 1 {
+    if pos == r.reference_end() - 1 {
         seq_buf.push(LAST_POS);
     }
 
@@ -126,11 +126,11 @@ pub fn write_del(
     cs: &CigarState,
     r: &Record,
     ipos: u32,
-    pos: usize,
+    pos: i64,
     seq_buf: &mut Vec<u8>,
     qual_buf: &mut Vec<u8>,
     refseq: Option<&RefSeq>,
-    del_len: usize,
+    del_len: i64,
 ) -> Result<(), Error> {
     write_match(cs, r, ipos, pos, seq_buf, qual_buf, refseq)?;
     write!(seq_buf, "-{}", del_len)?;
@@ -148,7 +148,7 @@ pub fn write_ins(
     cs: &CigarState,
     r: &Record,
     ipos: u32,
-    pos: usize,
+    pos: i64,
     seq_buf: &mut Vec<u8>,
     qual_buf: &mut Vec<u8>,
     refseq: Option<&RefSeq>,
@@ -269,7 +269,7 @@ impl PileupIterator {
         let cur_rec = Record::new();
         let mut refseq = None;
         let min_baseq = params.plp.min_baseq;
-        let max_tid = header.target_count();
+        let max_tid = header.target_count() as i32;
 
         let read_filter = ReadFilter::new(
             params.plp.min_mapq,
@@ -322,7 +322,7 @@ impl PileupIterator {
         nins: usize,
         ndel: usize,
     ) -> Result<(), Error> {
-        print! {"{}\t{}\t{}\t{}\t", std::str::from_utf8(self.header.tid2name(self.tid))?, self.pos + 1, char::from(ref_base), nbases + nins + ndel }
+        print! {"{}\t{}\t{}\t{}\t", std::str::from_utf8(self.header.tid2name(self.tid as u32))?, self.pos + 1, char::from(ref_base), nbases + nins + ndel }
         if self.seq_buf.is_empty() {
             print! {"*\t"}
         } else {
@@ -345,6 +345,7 @@ impl PileupIterator {
     pub fn set_pileup(&mut self) -> Result<bool, Error> {
         assert!(self.rbuf.backup_buf.is_empty());
         let mut generated = false;
+        let mut qual: u8;
 
         let mut ndel @ mut nins @ mut nbases = 0;
         let ref_base = match &self.refseq {
@@ -364,7 +365,13 @@ impl PileupIterator {
 
             let ret = cigar_get_pos(&mut r.cstate, self.pos as u32);
 
-            if r.rec.qual()[r.cstate.qpos] < self.min_baseq {
+            qual = if r.cstate.qpos >= r.rec.inner.core.l_qseq as usize {
+                0
+            } else {
+                r.rec.qual()[r.cstate.qpos]
+            };
+
+            if qual < self.min_baseq {
                 drop(r);
                 self.rbuf.backup_buf.push(raw);
                 continue;
@@ -391,7 +398,6 @@ impl PileupIterator {
                     write_ins(
                         &r.cstate,
                         &r.rec,
-                        // ipos as u32,
                         r.cstate.qpos as u32,
                         self.pos,
                         &mut self.seq_buf,
@@ -406,17 +412,16 @@ impl PileupIterator {
                         write_del(
                             &r.cstate,
                             &r.rec,
-                            // ipos as u32,
                             r.cstate.qpos as u32,
                             self.pos,
                             &mut self.seq_buf,
                             &mut self.qual_buf,
                             self.refseq.as_ref(),
-                            l as usize,
+                            l as i64,
                         )?
                     } else {
                         self.seq_buf.push(b'*');
-                        self.qual_buf.push(get_qual(r.rec.qual()[r.cstate.qpos]))
+                        self.qual_buf.push(qual)
                     }
                     ndel += 1;
                 }
@@ -457,38 +462,28 @@ impl PileupIterator {
             self.tid += 1;
         }
 
-        if self.tid >= self.header.target_count() {
-            Ok(IterResult::NoData)
-        } else {
-            if let Some(r) = self.refseq.as_mut() {
-                // right now we just get the entire reference sequence.
-                // Next step will be to load it in windows.
-                let tidname = std::str::from_utf8(self.header.tid2name(self.tid));
-                r.load_seq(
-                    tidname?,
-                    0,
-                    self.header
-                        .target_len(self.tid)
-                        .context("Failed to get target length")?,
-                )?
-            }
+        let tlen = self.header.target_len(self.tid as u32).with_context(|| {
+            format!(
+                "Failed to get target length for {}",
+                std::str::from_utf8(self.header.tid2name(self.tid as u32)).unwrap()
+            )
+        })?;
 
-            self.max_pos = self.header.target_len(self.tid).context("No ref len")? as usize;
-            self.pos = 0;
-            self.next_pos = 0;
-            self.reader.fetch((self.tid, 0, u32::MAX))?;
-            Ok(IterResult::Generated)
+        if let Some(r) = self.refseq.as_mut() {
+            // right now we just get the entire reference sequence.
+            // Next step will be to load it in windows.
+            let tidname = std::str::from_utf8(self.header.tid2name(self.tid as u32));
+            r.load_seq(tidname?, 0, tlen)?
         }
+
+        self.max_pos = tlen as i64;
+        self.pos = 0;
+        self.next_pos = 0;
+        self.reader.fetch((self.tid, 0, u32::MAX))?;
+        Ok(IterResult::Generated)
     }
 
     pub fn next(&mut self) -> Result<IterResult, Error> {
-        if self.pos > self.max_pos {
-            match self.tid >= self.tid_count {
-                true => return Ok(IterResult::NoData),
-                false => return Ok(IterResult::ReferenceEnd),
-            }
-        }
-
         while let Some(read) = self.reader.read(&mut self.cur_rec) {
             read?;
             let r = &self.cur_rec;
@@ -502,25 +497,23 @@ impl PileupIterator {
             }
 
             // TODO: resolve the int conversion mess
-            if (r.pos() as usize) < self.pos || (r.tid() as u32) < self.tid {
+            if r.pos() < self.pos || r.tid() < self.tid {
                 panic!("UNSORTED BAM")
             }
 
             let ret = self.rbuf.attempt_push(&r, self.pos, self.tid);
-            self.next_pos = r.pos() as usize;
 
             match ret {
                 read_buf::BufPushResult::Unmapped => panic!(),
                 read_buf::BufPushResult::DifferentReference => return Ok(IterResult::ReferenceEnd),
-                read_buf::BufPushResult::Pushed | read_buf::BufPushResult::MaxDepthMet => {
-                    while self.pos < self.next_pos {
-                        self.set_pileup()?;
-                        self.pos += 1;
-                    }
+                read_buf::BufPushResult::MaxDepthMet => continue,
+                read_buf::BufPushResult::Pushed => self.next_pos = r.pos(),
+            }
 
-                    return Ok(IterResult::Generated);
-                }
-            };
+            while self.pos < self.next_pos {
+                self.set_pileup()?;
+                self.pos += 1;
+            }
         }
 
         while self.pos < self.max_pos {
@@ -528,9 +521,10 @@ impl PileupIterator {
             self.pos += 1;
         }
 
-        self.pos += 1;
-
-        Ok(IterResult::Generated)
+        match self.tid + 1 == self.tid_count as i32 {
+            true => Ok(IterResult::NoData),
+            false => Ok(IterResult::ReferenceEnd),
+        }
     }
 }
 

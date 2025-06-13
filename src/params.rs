@@ -31,10 +31,10 @@ pub struct InputParams {
     pub refseq: Option<String>,
 
     #[arg(long = "tid")]
-    pub tid: Option<u32>,
+    pub tid: Option<i32>,
 
     #[arg(long = "pos")]
-    pub pos: Option<usize>,
+    pub pos: Option<i64>,
 
     #[arg(short = 'd', long = "depth", default_value_t = 8000)]
     pub depth: usize,
