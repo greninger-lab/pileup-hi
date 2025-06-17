@@ -1,7 +1,8 @@
 #![allow(dead_code)]
 use crate::pileup::PileUp;
+use crate::read_walker::WalkMatches;
 use anyhow::Error;
-use rust_htslib::bam::{ext::BamRecordExtensions, Record};
+use rust_htslib::bam::Record;
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::slice;
@@ -101,31 +102,85 @@ pub fn decide_which_read(chars: &[u8]) -> bool {
     h & 1 != 0
 }
 
-pub fn tweak_overlap_qual(a: &mut Record, b: &mut Record) -> Result<(), Error> {
-    let mut new_qual: u8;
-    let mut base_a @ mut base_b: u8;
-    let amul @ bmul: bool;
+/// at a reference position covered by both reads, null one's phred scores and keep the other
+pub fn null_ref_bases(
+    a: &mut Record,
+    aread: usize,
+    b: &mut Record,
+    bread: usize,
+    amul: bool,
+    bmul: bool,
+    base_a: &mut u8,
+    base_b: &mut u8,
+    new_qual: &mut u8,
+) -> Result<(), Error> {
+    (*base_a, *base_b) = (a.seq()[aread], b.seq()[bread]);
 
-    // println! {"QNAME: {} |", std::str::from_utf8(a.qname())?}
+    // both bases mismatch, so pick based on quality (or random if tie)
+    if base_a != base_b {
+        match a.qual()[aread].cmp(&b.qual()[bread]) {
+            Ordering::Less => {
+                *new_qual = (b.qual()[bread] as f64 * 0.8) as u8;
+                set_qual(a, aread, 0)?;
+                set_qual(b, bread, *new_qual)?;
+            }
+
+            Ordering::Greater => {
+                *new_qual = (a.qual()[aread] as f64 * 0.8) as u8;
+                set_qual(a, aread, *new_qual)?;
+                set_qual(b, bread, 0)?;
+            }
+
+            Ordering::Equal => {
+                if amul {
+                    *new_qual = (a.qual()[aread] as f64 * 0.8) as u8;
+                    set_qual(a, aread, *new_qual)?;
+                    set_qual(b, bread, 0)?;
+                } else {
+                    *new_qual = (b.qual()[bread] as f64 * 0.8) as u8;
+                    set_qual(a, aread, 0)?;
+                    set_qual(b, bread, *new_qual)?;
+                }
+            }
+        }
+    } else {
+        // both bases match; Bump the quality up for one read and null the
+        // other's
+        *new_qual = (a.qual()[aread].wrapping_add(b.qual()[bread])).min(200);
+
+        // set quals accordingly
+        if amul {
+            set_qual(a, aread, *new_qual)?;
+            set_qual(b, bread, 0)?;
+        } else {
+            set_qual(a, aread, 0)?;
+            set_qual(b, bread, *new_qual)?;
+        }
+
+        // println!("Adjusting quality to be ultra-confident {aread} | A POS: {aread} | B POS: {bread} | A QUAL: {} | B QUAL: {}", a.qual()[aread], b.qual()[bread])
+    }
+
+    Ok(())
+}
+
+pub fn tweak_overlap_qual(a: &mut Record, b: &mut Record) -> Result<(), Error> {
+    let mut new_qual: u8 = 0;
+    let mut base_a @ mut base_b: u8 = b'N';
+    let (mut iref_a, mut iref_b) = (0, 0);
+    let amul @ bmul: bool;
 
     // we assume that we encounter reads in order (e.g coord-sorted).
     assert!(a.pos() <= b.pos());
 
-    // using aligned_pairs() for this, since I just need sequence that overlaps in covered ref
-    // positions.
-    // gets iterators over tuples of (read_pos, ref_pos).
-
-    // we use [Record::aligned_pairs_full] to also retrieve deletion bases, for which we also adjust quality
-    // (treated the same as mismatches)
-    let mut ap = a
-        .aligned_pairs_full()
-        .map(|x| (x[0].map(|x| x as usize), x[1]))
-        .peekable();
-
-    let mut bp = b
-        .aligned_pairs_full()
-        .map(|x| (x[0].map(|x| x as usize), x[1]))
-        .peekable();
+    let mut ap = a.walk_matches();
+    // catch up read A to read B's start pos
+    while ap.genome_pos < b.pos() {
+        match ap.next() {
+            Some(_) => (),
+            None => return Ok(()), // no overlap :(
+        };
+    }
+    let mut bp = b.walk_matches();
 
     // for now: using htslib's hashing heuristic to decide which read to modify, bound to change
     // (maybe)
@@ -135,107 +190,75 @@ pub fn tweak_overlap_qual(a: &mut Record, b: &mut Record) -> Result<(), Error> {
     }
 
     loop {
-        match (ap.peek(), bp.peek()) {
-            (Some((aread, aref)), Some((bread, bref))) => match (aread, aref, bread, bref) {
-                (_, None, _, None) => _ = (ap.next(), bp.next()), // both with insertion
-                (_, _, _, None) => _ = bp.next(),                 // b has an insertion at this base
-                (_, None, _, _) => _ = ap.next(),                 // a has an insertion at this base
+        match (ap.next(), bp.next()) {
+            (Some((mut apos, mut a_iref)), Some((mut bpos, mut b_iref))) => {
+                // check for deletion in read A
+                println! {"APOS: {apos} BPOS: {bpos} {} {}", ap.after_del(), bp.after_del()} // if a_iref > b_iref && ap.passed_deletion() {
+                if a_iref > b_iref && ap.after_del() {
+                    println! {"deletion in read A {a_iref} {b_iref}"}
+                    while b_iref < a_iref {
+                        new_qual = if bmul {
+                            (b.qual()[bpos] as f32 * 0.8) as u8
+                        } else {
+                            0
+                        };
 
-                // we are now at a existing reference position for both read A and B
-                (aread, Some(aref), bread, Some(bref)) => {
-                    if *aref < b.pos() {
-                        // we're still behind read B, so advance to catch up, and try again
-                        ap.next();
-                        continue;
+                        set_qual(b, bpos, new_qual)?;
+                        if let Some((n_bpos, n_b_iref)) = bp.next() {
+                            b_iref = n_b_iref;
+                            bpos = n_bpos;
+                        } else {
+                            break;
+                        }
                     }
+                };
 
-                    assert_eq!(aref, bref, "{aref} {bref}");
+                // check for deletion in read B
+                // if b_iref > a_iref && bp.passed_deletion() {
+                if b_iref > a_iref && bp.after_del() {
+                    println! {"deletion in read B {a_iref} {b_iref}"}
+                    while a_iref < b_iref {
+                        new_qual = if amul {
+                            (a.qual()[apos] as f32 * 0.8) as u8
+                        } else {
+                            0
+                        };
 
-                    // we now are at matching ref positions covered by both reads
-                    match (aread, bread) {
-                        // read B has a deletion
-                        (&Some(aread), None) => {
-                            if amul {
-                                new_qual = (a.qual()[aread] as f64 * 0.8) as u8;
-                            } else {
-                                new_qual = 0;
-                            }
-
-                            set_qual(a, aread, new_qual)?;
+                        set_qual(a, apos, new_qual)?;
+                        if let Some((n_apos, n_a_iref)) = ap.next() {
+                            a_iref = n_a_iref;
+                            apos = n_apos;
+                        } else {
+                            break;
                         }
-
-                        // read A has a deletion
-                        (None, &Some(bread)) => {
-                            if bmul {
-                                new_qual = (b.qual()[bread] as f64 * 0.8) as u8;
-                            } else {
-                                new_qual = 0;
-                            }
-
-                            set_qual(b, bread, new_qual)?;
-                        }
-
-                        // both have non-insertion bases at this position
-                        (&Some(aread), &Some(bread)) => {
-                            (base_a, base_b) = (a.seq()[aread], b.seq()[bread]);
-
-                            // both bases mismatch, so pick based on quality (or random if tie)
-                            if base_a != base_b {
-                                match a.qual()[aread].cmp(&b.qual()[bread]) {
-                                    Ordering::Less => {
-                                        new_qual = (b.qual()[bread] as f64 * 0.8) as u8;
-                                        set_qual(a, aread, 0)?;
-                                        set_qual(b, bread, new_qual)?;
-                                    }
-
-                                    Ordering::Greater => {
-                                        new_qual = (a.qual()[aread] as f64 * 0.8) as u8;
-                                        set_qual(a, aread, new_qual)?;
-                                        set_qual(b, bread, 0)?;
-                                    }
-
-                                    Ordering::Equal => {
-                                        if amul {
-                                            new_qual = (a.qual()[aread] as f64 * 0.8) as u8;
-                                            set_qual(a, aread, new_qual)?;
-                                            set_qual(b, bread, 0)?;
-                                        } else {
-                                            new_qual = (b.qual()[bread] as f64 * 0.8) as u8;
-                                            set_qual(a, aread, 0)?;
-                                            set_qual(b, bread, new_qual)?;
-                                        }
-                                    }
-                                }
-                            } else {
-                                // both bases match; Bump the quality up for one read and null the
-                                // other's
-                                new_qual = (a.qual()[aread].wrapping_add(b.qual()[bread])).min(200);
-
-                                // set quals accordingly
-                                if amul {
-                                    set_qual(a, aread, new_qual)?;
-                                    set_qual(b, bread, 0)?;
-                                } else {
-                                    set_qual(a, aread, 0)?;
-                                    set_qual(b, bread, new_qual)?;
-                                }
-
-                                // println!("Adjusting quality to be ultra-confident {aread} | A POS: {aread} | B POS: {bread} | A QUAL: {} | B QUAL: {}", a.qual()[aread], b.qual()[bread])
-                            }
-                        }
-
-                        (None, None) => (), // both have dels, so move on
                     }
+                };
 
-                    // done with this reference position. Moving on...
-                    ap.next();
-                    bp.next();
-                }
-            },
+                assert_eq!(
+                    a_iref,
+                    b_iref,
+                    "APOS: {apos} BPOS: {bpos} NAME: {} {} {}\n ACOORD: {} BCOORD: {}",
+                    std::str::from_utf8(a.qname())?,
+                    a.cigar(),
+                    b.cigar(),
+                    ap.genome_pos - 1,
+                    bp.genome_pos - 1,
+                );
+                // we are now at matching offsets for read A and read B
+                null_ref_bases(
+                    a,
+                    apos,
+                    b,
+                    bpos,
+                    amul,
+                    bmul,
+                    &mut base_a,
+                    &mut base_b,
+                    &mut new_qual,
+                )?;
+            }
 
-            // once we run out of bases for one of the reads, no use comparing.
-            (None, Some(_)) | (Some(_), None) => break,
-            (None, None) => break,
+            _ => break,
         }
     }
 
