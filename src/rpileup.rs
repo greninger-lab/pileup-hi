@@ -139,7 +139,7 @@ pub fn write_del(
             Some(refseq) => get_base(refseq.get_base(p as u64)?, r.is_reverse()),
             None => b'N',
         };
-        seq_buf.push(b);
+        seq_buf.push(get_base(b, r.is_reverse()));
     }
     Ok(())
 }

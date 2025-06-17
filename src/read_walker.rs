@@ -62,6 +62,7 @@ impl Iterator for IterCigarMatches {
                     self.cigar_index += 1;
                 }
 
+                // TODO: Check cigar-walking logic for refskip and hardclip
                 Cigar::RefSkip(_) | Cigar::Pad(_) | Cigar::HardClip(_) => (),
             }
         }
