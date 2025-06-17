@@ -143,6 +143,8 @@ pub fn null_ref_bases(
                 }
             }
         }
+
+        // println! {"Adjusting mismatch: {aread} {bread} {} {} {}", a.qual()[aread], b.qual()[bread], std::str::from_utf8(a.qname())?}
     } else {
         // both bases match; Bump the quality up for one read and null the
         // other's
@@ -166,7 +168,6 @@ pub fn null_ref_bases(
 pub fn tweak_overlap_qual(a: &mut Record, b: &mut Record) -> Result<(), Error> {
     let mut new_qual: u8 = 0;
     let mut base_a @ mut base_b: u8 = b'N';
-    let (mut iref_a, mut iref_b) = (0, 0);
     let amul @ bmul: bool;
 
     // we assume that we encounter reads in order (e.g coord-sorted).
@@ -193,9 +194,8 @@ pub fn tweak_overlap_qual(a: &mut Record, b: &mut Record) -> Result<(), Error> {
         match (ap.next(), bp.next()) {
             (Some((mut apos, mut a_iref)), Some((mut bpos, mut b_iref))) => {
                 // check for deletion in read A
-                println! {"APOS: {apos} BPOS: {bpos} {} {}", ap.after_del(), bp.after_del()} // if a_iref > b_iref && ap.passed_deletion() {
+                // println! {"APOS: {apos} BPOS: {bpos} {} {}", ap.after_del(), bp.after_del()} // if a_iref > b_iref && ap.passed_deletion() {
                 if a_iref > b_iref && ap.after_del() {
-                    println! {"deletion in read A {a_iref} {b_iref}"}
                     while b_iref < a_iref {
                         new_qual = if bmul {
                             (b.qual()[bpos] as f32 * 0.8) as u8
@@ -204,11 +204,12 @@ pub fn tweak_overlap_qual(a: &mut Record, b: &mut Record) -> Result<(), Error> {
                         };
 
                         set_qual(b, bpos, new_qual)?;
+                        // println! {"Adjusting to deletion in read A: POS: {bpos} QUAL: {new_qual}, {}", std::str::from_utf8(a.qname())?}
                         if let Some((n_bpos, n_b_iref)) = bp.next() {
                             b_iref = n_b_iref;
                             bpos = n_bpos;
                         } else {
-                            break;
+                            return Ok(());
                         }
                     }
                 };
@@ -216,7 +217,6 @@ pub fn tweak_overlap_qual(a: &mut Record, b: &mut Record) -> Result<(), Error> {
                 // check for deletion in read B
                 // if b_iref > a_iref && bp.passed_deletion() {
                 if b_iref > a_iref && bp.after_del() {
-                    println! {"deletion in read B {a_iref} {b_iref}"}
                     while a_iref < b_iref {
                         new_qual = if amul {
                             (a.qual()[apos] as f32 * 0.8) as u8
@@ -225,26 +225,16 @@ pub fn tweak_overlap_qual(a: &mut Record, b: &mut Record) -> Result<(), Error> {
                         };
 
                         set_qual(a, apos, new_qual)?;
+                        // println! {"Adjusting to deletion in read B: POS: {apos} QUAL: {new_qual}, {}", std::str::from_utf8(a.qname())?}
                         if let Some((n_apos, n_a_iref)) = ap.next() {
                             a_iref = n_a_iref;
                             apos = n_apos;
                         } else {
-                            break;
+                            return Ok(());
                         }
                     }
                 };
 
-                assert_eq!(
-                    a_iref,
-                    b_iref,
-                    "APOS: {apos} BPOS: {bpos} NAME: {} {} {}\n ACOORD: {} BCOORD: {}",
-                    std::str::from_utf8(a.qname())?,
-                    a.cigar(),
-                    b.cigar(),
-                    ap.genome_pos - 1,
-                    bp.genome_pos - 1,
-                );
-                // we are now at matching offsets for read A and read B
                 null_ref_bases(
                     a,
                     apos,

@@ -39,7 +39,6 @@ impl Iterator for IterCigarMatches {
 
         loop {
             if self.cigar_index >= self.cigar.len() {
-                // self.cigar_index -= 1; // don't use iterator after this
                 return None;
             }
 
