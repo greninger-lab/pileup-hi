@@ -186,97 +186,87 @@ pub fn tweak_overlap_qual(a: &mut Record, b: &mut Record) -> Result<(), Error> {
         false => (amul, bmul) = (false, true),
     }
 
-    // if ap.genome_pos < bp.genome_pos {
-    //     ap.next();
-    //     while ap.genome_pos < bp.genome_pos - 1 {
-    //         println! {"Advancing.... {} {}", ap.genome_pos, bp.genome_pos}
-    //         match ap.next() {
-    //             Some(_) => (),
-    //             None => return Ok(()),
-    //         }
-    //     }
-    // }
-
     let mut iref = b.pos();
+    let (mut apos, mut a_iref, mut bpos, mut b_iref) =
+        (ap.read_pos, ap.genome_pos, bp.read_pos, bp.genome_pos);
 
     loop {
-        match (ap.next(), bp.next()) {
-            (Some((mut apos, mut a_iref)), Some((mut bpos, mut b_iref))) => {
-                while ap.genome_pos < iref {
-                    match ap.next() {
-                        Some((ap, ai)) => (apos, a_iref) = (ap, ai),
-                        None => return Ok(()),
-                    }
-                }
-
-                while bp.genome_pos < iref {
-                    match bp.next() {
-                        Some((bp, bi)) => (bpos, b_iref) = (bp, bi),
-                        None => return Ok(()),
-                    }
-                }
-                // check for deletion in read A
-                // println! {"APOS: {apos} BPOS: {bpos} {} {}", ap.after_del(), bp.after_del()} // if a_iref > b_iref && ap.passed_deletion() {
-                if a_iref > b_iref && ap.after_del() {
-                    while b_iref < a_iref {
-                        new_qual = if bmul {
-                            (b.qual()[bpos] as f32 * 0.8) as u8
-                        } else {
-                            0
-                        };
-
-                        set_qual(b, bpos, new_qual)?;
-                        // println! {"Adjusting to deletion in read A: POS: {bpos} QUAL: {new_qual} {}", std::str::from_utf8(a.qname())?}
-                        if let Some((n_bpos, n_b_iref)) = bp.next() {
-                            b_iref = n_b_iref;
-                            bpos = n_bpos;
-                        } else {
-                            return Ok(());
-                        }
-                    }
-                };
-
-                // check for deletion in read B
-                // if b_iref > a_iref && bp.passed_deletion() {
-                if b_iref > a_iref && bp.after_del() {
-                    while a_iref < b_iref {
-                        new_qual = if amul {
-                            (a.qual()[apos] as f32 * 0.8) as u8
-                        } else {
-                            0
-                        };
-
-                        set_qual(a, apos, new_qual)?;
-                        // println! {"Adjusting to deletion in read B: POS: {apos} QUAL: {new_qual} {}", std::str::from_utf8(a.qname())?}
-                        if let Some((n_apos, n_a_iref)) = ap.next() {
-                            a_iref = n_a_iref;
-                            apos = n_apos;
-                        } else {
-                            return Ok(());
-                        }
-                    }
-                };
-
-                null_ref_bases(
-                    a,
-                    apos,
-                    b,
-                    bpos,
-                    amul,
-                    bmul,
-                    &mut base_a,
-                    &mut base_b,
-                    &mut new_qual,
-                )?;
-
-                iref += 1;
+        while ap.genome_pos < iref {
+            match ap.next() {
+                Some((ap, ai)) => (apos, a_iref) = (ap, ai),
+                None => return Ok(()),
             }
-
-            _ => break,
         }
+
+        while bp.genome_pos < iref {
+            match bp.next() {
+                Some((bp, bi)) => (bpos, b_iref) = (bp, bi),
+                None => return Ok(()),
+            }
+        }
+
+        // print!("{iref}");
+
+        iref = iref.max(ap.genome_pos);
+        iref = iref.max(bp.genome_pos);
+        iref += 1; // prepare for next position
+
+        // check for deletion in read A
+        // println! {"APOS: {apos} BPOS: {bpos} {} {} {} {}", ap.after_del(), bp.after_del(), ap.genome_pos, bp.genome_pos} // if a_iref > b_iref && ap.passed_deletion() {
+        if a_iref > b_iref && ap.after_del() {
+            while b_iref < a_iref {
+                new_qual = if bmul {
+                    (b.qual()[bpos] as f32 * 0.8) as u8
+                } else {
+                    0
+                };
+
+                set_qual(b, bpos, new_qual)?;
+                // println! {"Adjusting to deletion in read A: POS: {bpos} QUAL: {new_qual} {}", std::str::from_utf8(a.qname())?}
+                if let Some((n_bpos, n_b_iref)) = bp.next() {
+                    b_iref = n_b_iref;
+                    bpos = n_bpos;
+                } else {
+                    return Ok(());
+                }
+            }
+        };
+
+        // check for deletion in read B
+        // if b_iref > a_iref && bp.passed_deletion() {
+        if b_iref > a_iref && bp.after_del() {
+            while a_iref < b_iref {
+                new_qual = if amul {
+                    (a.qual()[apos] as f32 * 0.8) as u8
+                } else {
+                    0
+                };
+
+                set_qual(a, apos, new_qual)?;
+                // println! {"Adjusting to deletion in read B: POS: {apos} QUAL: {new_qual} {}", std::str::from_utf8(a.qname())?}
+                if let Some((n_apos, n_a_iref)) = ap.next() {
+                    a_iref = n_a_iref;
+                    apos = n_apos;
+                } else {
+                    return Ok(());
+                }
+            }
+        };
+
+        null_ref_bases(
+            a,
+            apos,
+            b,
+            bpos,
+            amul,
+            bmul,
+            &mut base_a,
+            &mut base_b,
+            &mut new_qual,
+        )?;
     }
 
-    Ok(())
+    // Ok(())
 }
 
 #[cfg(test)]

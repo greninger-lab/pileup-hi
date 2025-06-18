@@ -5,7 +5,7 @@ pub struct IterCigarMatches {
     cigar: Vec<Cigar>,
     cigar_index: usize,
     match_remaining: u32,
-    read_pos: usize,
+    pub read_pos: usize,
     pub genome_pos: i64,
 }
 
