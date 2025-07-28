@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use crate::pileup::PileUp;
+use crate::pileup_iterator::PileUp;
 use crate::read_walker::WalkMatches;
 use anyhow::Error;
 use rust_htslib::bam::Record;

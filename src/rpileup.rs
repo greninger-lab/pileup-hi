@@ -1,6 +1,7 @@
 use crate::bamio::BamReader;
 use crate::params::Params;
-use crate::pileup::CigarState;
+use crate::pileup_iterator::CigarState;
+use crate::pileup_writer::PileupWriter;
 use crate::read_buf;
 use crate::read_filter::ReadFilter;
 use crate::refseq::RefSeq;
@@ -8,16 +9,9 @@ use crate::refseq::RefSeq;
 use anyhow::{Context, Error};
 use rust_htslib::bam::record::Cigar;
 use rust_htslib::bam::{ext::BamRecordExtensions, Record};
-use std::io::Write;
 
 const UNINIT_POS: i64 = i64::MAX - 1;
 const UNINIT_TID: i32 = i32::MAX - 1;
-
-const LAST_POS: u8 = b'$';
-const FIRST_POS: u8 = b'^';
-
-const F_MATCH: u8 = b'.';
-const R_MATCH: u8 = b',';
 
 pub struct PileupIterator {
     tid: i32,
@@ -27,10 +21,9 @@ pub struct PileupIterator {
     tid_count: i32,
     show_all: bool,
     rbuf: read_buf::ReadBuffer,
+    pileup_writer: PileupWriter,
     reader: BamReader,
     refseq: Option<RefSeq>,
-    seq_buf: Vec<u8>,
-    qual_buf: Vec<u8>,
     read_filter: ReadFilter,
     cur_rec: Record,
     min_baseq: u8,
@@ -47,137 +40,6 @@ pub enum CigarAtPos {
     BeforePos(),
     Op(Cigar),
     BaseEmpty(),
-}
-
-pub fn get_base(mut cur_base: u8, is_reverse: bool) -> u8 {
-    match is_reverse {
-        false => cur_base.make_ascii_uppercase(),
-        true => cur_base.make_ascii_lowercase(),
-    }
-
-    cur_base
-}
-
-// cap qualitites at max of 126; this also helps avoid non-ascii output
-pub fn get_qual(qual: u8) -> u8 {
-    match qual.cmp(&92).is_gt() {
-        true => 126,
-        false => qual + 33,
-    }
-}
-
-pub fn get_base_to_ref(
-    cur_base: u8,
-    ref_coord: u64,
-    refseq: Option<&RefSeq>,
-    is_reverse: bool,
-) -> Result<u8, Error> {
-    if let Some(refseq) = refseq {
-        let ref_base = refseq.get_base(ref_coord)?;
-        if ref_base == cur_base {
-            if is_reverse {
-                Ok(R_MATCH)
-            } else {
-                Ok(F_MATCH)
-            }
-        } else {
-            Ok(get_base(cur_base, is_reverse))
-        }
-    } else {
-        Ok(get_base(cur_base, is_reverse))
-    }
-}
-
-pub fn write_match(
-    _cs: &CigarState,
-    r: &Record,
-    ipos: u32,
-    pos: i64,
-    seq_buf: &mut Vec<u8>,
-    qual_buf: &mut Vec<u8>,
-    refseq: Option<&RefSeq>,
-) -> Result<(), Error> {
-    let ipos = ipos as usize;
-    let bam_pos = r.pos();
-
-    if pos == bam_pos {
-        seq_buf.push(FIRST_POS);
-        seq_buf.push(get_qual(r.mapq()));
-    }
-
-    let cur_base = r.seq()[ipos];
-
-    let base = get_base_to_ref(cur_base, pos as u64, refseq, r.is_reverse())?;
-
-    let cur_qual = r.qual()[ipos];
-
-    seq_buf.push(base);
-
-    if pos == r.reference_end() - 1 {
-        seq_buf.push(LAST_POS);
-    }
-
-    qual_buf.push(get_qual(cur_qual));
-
-    Ok(())
-}
-
-pub fn write_del(
-    cs: &CigarState,
-    r: &Record,
-    ipos: u32,
-    pos: i64,
-    seq_buf: &mut Vec<u8>,
-    qual_buf: &mut Vec<u8>,
-    refseq: Option<&RefSeq>,
-    del_len: i64,
-) -> Result<(), Error> {
-    write_match(cs, r, ipos, pos, seq_buf, qual_buf, refseq)?;
-    write!(seq_buf, "-{}", del_len)?;
-    for p in pos + 1..pos + del_len + 1 {
-        let b = match refseq {
-            Some(refseq) => get_base(refseq.get_base(p as u64)?, r.is_reverse()),
-            None => b'N',
-        };
-        seq_buf.push(get_base(b, r.is_reverse()));
-    }
-    Ok(())
-}
-
-pub fn write_ins(
-    cs: &CigarState,
-    r: &Record,
-    ipos: u32,
-    pos: i64,
-    seq_buf: &mut Vec<u8>,
-    qual_buf: &mut Vec<u8>,
-    refseq: Option<&RefSeq>,
-) -> Result<(), Error> {
-    write_match(cs, r, ipos, pos, seq_buf, qual_buf, refseq)?;
-    let mut k = cs.icig + 1;
-    let ncig = cs.cig.len();
-    while k < ncig {
-        match cs.cig[k] {
-            Cigar::Pad(l) => {
-                seq_buf.extend(std::iter::repeat_n(b'*', l as usize));
-            }
-
-            Cigar::Ins(l) => {
-                write!(seq_buf, "+{}", l)?;
-                let (s, e) = ((ipos + 1) as usize, (ipos + 1 + l) as usize);
-                for i in s..e {
-                    let base = get_base(r.seq()[i], r.is_reverse());
-                    seq_buf.push(base);
-                }
-            }
-
-            _ => break,
-        }
-
-        k += 1;
-    }
-
-    Ok(())
 }
 
 pub fn cigar_get_pos(cs: &mut CigarState, pos: u32) -> CigarAtPos {
@@ -261,9 +123,9 @@ impl PileupIterator {
         let tid = params.inp.tid.unwrap_or(UNINIT_TID);
         let pos @ next_pos @ max_pos = params.inp.pos.unwrap_or(UNINIT_POS);
         let reader = BamReader::new(&params.inp)?;
+        let pileup_writer = PileupWriter::new();
         let rbuf = read_buf::ReadBuffer::new(params.inp.depth, params.plp.disable_overlaps);
         let show_all = params.plp.show_empty_coords;
-        let (seq_buf, qual_buf) = (Vec::with_capacity(500), Vec::with_capacity(500));
         let cur_rec = Record::new();
         let mut refseq = None;
         let min_baseq = params.plp.min_baseq;
@@ -287,13 +149,12 @@ impl PileupIterator {
             max_pos,
             tid_count: max_tid,
             rbuf,
+            pileup_writer,
             reader,
             min_baseq,
             read_filter,
             show_all,
             refseq,
-            seq_buf,
-            qual_buf,
             cur_rec,
         })
     }
@@ -308,33 +169,6 @@ impl PileupIterator {
                 IterResult::ReferenceEnd => _ = self.init_to_ref()?,
             }
         }
-
-        Ok(())
-    }
-
-    pub fn write_pileup_str(
-        &mut self,
-        ref_base: u8,
-        nbases: usize,
-        nins: usize,
-        ndel: usize,
-    ) -> Result<(), Error> {
-        print! {"{}\t{}\t{}\t{}\t", std::str::from_utf8(self.reader.header.tid2name(self.tid as u32))?, self.pos + 1, char::from(ref_base), nbases + nins + ndel }
-        if self.seq_buf.is_empty() {
-            print! {"*\t"}
-        } else {
-            print! {"{}\t", std::str::from_utf8(&self.seq_buf)?}
-            self.seq_buf.clear();
-        }
-
-        if self.qual_buf.is_empty() {
-            print! {"*"}
-        } else {
-            print! {"{}", std::str::from_utf8(&self.qual_buf)?}
-            self.qual_buf.clear();
-        }
-
-        print! {"\n"}
 
         Ok(())
     }
@@ -374,51 +208,48 @@ impl PileupIterator {
                 continue;
             }
 
-            // println! {"POS: {} QNAME: {}", self.pos, std::str::from_utf8(r.rec.qname())?}
             match ret {
                 CigarAtPos::Op(Cigar::Match(_)) => {
-                    write_match(
-                        &r.cstate,
+                    self.pileup_writer.write_match(
                         &r.rec,
                         r.cstate.qpos as u32,
                         self.pos,
-                        &mut self.seq_buf,
-                        &mut self.qual_buf,
-                        self.refseq.as_ref(),
+                        &self.refseq,
                     )?;
 
                     nbases += 1;
                 }
 
                 CigarAtPos::Op(Cigar::Ins(_)) => {
-                    nins += 1;
-                    write_ins(
-                        &r.cstate,
+                    self.pileup_writer.write_match(
                         &r.rec,
                         r.cstate.qpos as u32,
                         self.pos,
-                        &mut self.seq_buf,
-                        &mut self.qual_buf,
-                        self.refseq.as_ref(),
+                        &self.refseq,
                     )?;
+
+                    self.pileup_writer
+                        .write_insertion(&r.cstate, &r.rec, r.cstate.qpos as u32)?;
+                    nins += 1;
                 }
 
                 CigarAtPos::Op(Cigar::Del(l)) => {
                     if !r.cstate.del {
-                        // write_del(self.pos, &mut self.seq_buf, l as usize)?;
-                        write_del(
-                            &r.cstate,
+                        self.pileup_writer.write_match(
                             &r.rec,
                             r.cstate.qpos as u32,
                             self.pos,
-                            &mut self.seq_buf,
-                            &mut self.qual_buf,
-                            self.refseq.as_ref(),
+                            &self.refseq,
+                        )?;
+
+                        self.pileup_writer.write_deletion_start(
+                            &r.rec,
+                            self.pos + 1,
+                            &self.refseq,
                             l as i64,
                         )?
                     } else {
-                        self.seq_buf.push(b'*');
-                        self.qual_buf.push(get_qual(qual))
+                        self.pileup_writer.write_deletion(qual);
                     }
                     ndel += 1;
                 }
@@ -441,7 +272,14 @@ impl PileupIterator {
         }
 
         if nbases + nins + ndel > 0 {
-            self.write_pileup_str(ref_base, nbases, nins, ndel)?;
+            self.pileup_writer.write_pileup_str(
+                ref_base,
+                self.pos,
+                nbases,
+                nins,
+                ndel,
+                &self.reader.cur_ref,
+            )?;
             generated = true;
         }
 

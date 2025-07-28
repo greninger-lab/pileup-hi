@@ -1,16 +1,17 @@
 use crate::params::parse_or_quit;
 use anyhow::Error;
 
+mod bamio;
 mod overlap;
 mod params;
-mod pileup;
+mod pileup_iterator;
+mod pileup_writer;
 mod read_buf;
 mod read_filter;
 mod read_walker;
 mod refseq;
 mod rpileup;
 mod utils;
-mod bamio;
 
 fn _main() -> Result<(), Error> {
     let params = parse_or_quit();
