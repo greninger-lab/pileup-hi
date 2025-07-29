@@ -12,9 +12,16 @@ pub struct Params {
     pub outp: OutputParams,
 }
 
+pub fn validate_params(p: &Params) {
+    if p.plp.indel_realign && p.inp.refseq.is_none() {
+        eprintln!{"You must provide a reference fasta when enabling indel realignment."};
+        std::process::exit(1);
+    }
+}
+
 pub fn parse_or_quit() -> Params {
     match Params::try_parse() {
-        Ok(p) => p,
+        Ok(p) => {validate_params(&p); p},
         Err(e) => {
             e.print().unwrap();
             std::process::exit(1)
@@ -47,6 +54,9 @@ pub struct InputParams {
 pub struct PileupParams {
     #[arg(short = 'a')]
     pub show_empty_coords: bool,
+
+    #[arg(short = 'i')]
+    pub indel_realign: bool,
 
     #[arg(long = "aa")]
     pub show_everything: bool,
