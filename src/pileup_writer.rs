@@ -1,4 +1,4 @@
-use crate::pileup_iterator::CigarState;
+use crate::pileup::CigarState;
 use crate::refseq::RefSeq;
 
 use anyhow::Error;
@@ -46,6 +46,8 @@ pub fn get_base_to_ref(
     return Ok(get_base(cur_base, is_reverse));
 }
 
+/// Class with methods to write pileup information output to stdout/file that is meant to be
+/// compliant with the default format of samtools mpileup.
 pub struct PileupWriter {
     qual_buf: Vec<u8>,
     seq_buf: Vec<u8>,

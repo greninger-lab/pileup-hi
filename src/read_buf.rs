@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 use crate::overlap::{MapOverlaps, OverlapMap};
-use crate::pileup_iterator::{cigar2rlen, CigarState, PileUp};
+use crate::pileup::{CigarState, PileUp, cigar2rlen};
 use rust_htslib::bam::Record;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 

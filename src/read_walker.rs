@@ -1,6 +1,10 @@
 use rust_htslib::bam::record::Cigar;
 use rust_htslib::bam::Record;
 
+/// The following code is basically a modification of
+/// [rust_htlsib::bam::Record::iter_aligned_full()]
+/// but modified to work with pair overlap correction.
+/// Specifically, to detect if the current base follows a deletion.
 pub struct IterCigarMatches {
     cigar: Vec<Cigar>,
     cigar_index: usize,
