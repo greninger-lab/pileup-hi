@@ -8,7 +8,12 @@ anyhow = "1.0.98"
 bio = "2.3.0"
 clap = { version = "4.5.38", features = ["derive"] }
 num_cpus = "1.16.0"
-rust-htslib = "0.49.0"
+rust-htslib = "0.50.0"
 
 [profile.dev]
 overflow-checks = false
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegene-units = 1
