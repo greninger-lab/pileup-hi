@@ -36,14 +36,14 @@ impl PileupPosition {
         self.quals.push(qual);
 
         match base == self.ref_base {
-            true => (),
+            true => self.nmatch += 1,
             false => self.nalt += 1,
         }
     }
 
     fn _ignore(&mut self, _qual: u8, base: u8) {
         match base == self.ref_base {
-            true => (),
+            true => self.nmatch += 1,
             false => self.nalt += 1,
         }
     }
@@ -65,13 +65,15 @@ impl PileupPosition {
         }
     }
 
-    pub fn is_active(&mut self, floor: f32, ceil: f32) -> bool {
-        let ratio = self.nalt as f32 / (self.nalt + self.nmatch) as f32;
+    /// Is a current pileup position in need of reassembly, i.e. is there a significant amount of
+    /// differences (indels, substitutions) relative to reference?
+    pub fn is_active(&mut self, floor: f32, ceil: f32, denom: f32) -> bool {
+        let ratio = (self.nalt + self.ndel + self.nins) as f32 / denom;
         ratio >= floor && ratio <= ceil
     }
 
     pub fn depth(&mut self) -> u32 {
-        self.ndel + self.nins + self.nmatch
+        self.ndel + self.nins + self.nmatch + self.nalt
     }
 
     pub fn clear(&mut self) {
@@ -223,7 +225,6 @@ impl PileupIterator {
                         self.store.ref_base,
                     )?;
 
-                    self.store.nmatch += 1;
                     (self.store.register)(&mut self.store, qual, readbase);
                 }
 
@@ -237,8 +238,8 @@ impl PileupIterator {
 
                     self.pileup_writer
                         .write_insertion(&r.cstate, &r.rec, r.cstate.qpos as u32)?;
+
                     self.store.nins += 1;
-                    (self.store.register)(&mut self.store, qual, readbase);
                 }
 
                 CigarAtPos::Op(Cigar::Del(l)) => {
@@ -260,7 +261,7 @@ impl PileupIterator {
                     }
 
                     self.store.ndel += 1;
-                    (self.store.register)(&mut self.store, qual, readbase);
+                    // (self.store.register)(&mut self.store, qual, readbase);
                 }
 
                 CigarAtPos::BeforePos() => {
@@ -282,6 +283,7 @@ impl PileupIterator {
         }
 
         let depth = self.store.depth();
+        if depth > 0 && self.store.is_active(0.1, 0.9, depth as f32) {}
 
         if self.show_all || depth > 0 {
             self.pileup_writer.write_pileup_str(
