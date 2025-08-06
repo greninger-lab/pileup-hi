@@ -2,9 +2,8 @@
 
 use anyhow::Error;
 use minimap2::{Aligner, Built};
-use rust_htslib::bam::{
-    Header, HeaderView, Record,
-};
+use rust_htslib::bam::{Header, HeaderView, Record};
+use left_align_indel::left_align_indels;
 
 use crate::pileup::PileupRef;
 
@@ -22,7 +21,6 @@ pub struct Realigner {
 /// this is meant to be called on a [Vec<Mapping>] from a single read
 pub fn filter_maps(maps: &mut Vec<Record>) -> Record {
     let mut aln: Vec<Record>;
-    // println!{"{:?}", maps}
 
     aln = maps
         .drain(..)
@@ -58,6 +56,9 @@ impl Realigner {
             .with_index_threads(num_cpus::get());
 
         aligner_build.mapopt.best_n = 1;
+        aligner_build.mapopt.b = 6;
+        aligner_build.mapopt.q = 12;
+        aligner_build.mapopt.end_bonus = 100;
         aligner_build.idxopt.k = 5;
         aligner_build.idxopt.w = 5;
 
@@ -150,7 +151,6 @@ impl Realigner {
             let plp = &mut plp.borrow_mut();
             self.realign(&plp.rec, header, &mut maps)?;
             if maps.is_empty() {
-
                 continue;
             }
 

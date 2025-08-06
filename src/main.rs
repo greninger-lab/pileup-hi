@@ -13,6 +13,7 @@ mod read_walker;
 mod realigner;
 mod refseq;
 mod utils;
+mod left_align_indel;
 
 fn _main() -> Result<(), Error> {
     let params = parse_or_quit();
