@@ -57,12 +57,12 @@ impl BamReader {
                 let header = inner.header().clone();
                 let max_tid = header.target_count() as i32;
                 let cur_ref = "UNINIT".to_string();
-                return Ok(Self {
+                Ok(Self {
                     inner,
                     header,
                     max_tid,
                     cur_ref,
-                });
+                })
             }
 
             false => {
@@ -71,12 +71,12 @@ impl BamReader {
                 let header = inner.header().clone();
                 let max_tid = header.target_count() as i32;
                 let cur_ref = "UNINIT".to_string();
-                return Ok(Self {
+                Ok(Self {
                     inner,
                     header,
                     max_tid,
                     cur_ref,
-                });
+                })
             }
         }
     }

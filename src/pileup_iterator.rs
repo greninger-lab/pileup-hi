@@ -207,7 +207,7 @@ impl PileupIterator {
         for raw in self.rbuf.rbuf.drain(..) {
             let mut r = raw.borrow_mut();
 
-            if read_ends_before_pos(&r.rec, self.pos as i64) {
+            if read_ends_before_pos(&r.rec, self.pos) {
                 discard.write_record(&r.rec)?;
                 continue;
             }
@@ -359,7 +359,7 @@ impl PileupIterator {
                 continue;
             }
 
-            if !self.read_filter.check_read(&r) {
+            if !self.read_filter.check_read(r) {
                 continue;
             }
 
@@ -367,7 +367,7 @@ impl PileupIterator {
                 panic!("UNSORTED BAM")
             }
 
-            let ret = self.rbuf.attempt_push(&r, self.pos, self.tid);
+            let ret = self.rbuf.attempt_push(r, self.pos, self.tid);
 
             match ret {
                 read_buf::BufPushResult::Unmapped => panic!(),
@@ -390,7 +390,7 @@ impl PileupIterator {
             self.pos += 1;
         }
 
-        match self.tid + 1 == self.tid_count as i32 {
+        match self.tid + 1 == self.tid_count {
             true => Ok(IterResult::NoData),
             false => Ok(IterResult::ReferenceEnd),
         }

@@ -25,7 +25,7 @@ pub fn hash_qname(r: &Record) -> u64 {
 
 impl MapOverlaps for OverlapMap {
     fn push(&mut self, plp: Rc<RefCell<Alignment>>) {
-        let mut r = &mut plp.borrow_mut().rec;
+        let r = &mut plp.borrow_mut().rec;
 
         if r.is_mate_unmapped() || !r.is_proper_pair() {
             return;
@@ -35,10 +35,10 @@ impl MapOverlaps for OverlapMap {
             return;
         }
 
-        let h = hash_qname(&r);
+        let h = hash_qname(r);
 
         if let Some(mate) = self.get_mut(&h) {
-            tweak_overlap_qual(&mut mate.borrow_mut().rec, &mut r).unwrap();
+            tweak_overlap_qual(&mut mate.borrow_mut().rec, r).unwrap();
             self.delete_hash(h);
             return;
         }
@@ -62,8 +62,10 @@ impl MapOverlaps for OverlapMap {
 
 /// this is just a modified version of [Record::qual] that returns a mutable slice to the qual
 /// array.
+///
+/// check to make sure div_ceil is ok
 pub fn qual_mut(r: &mut Record) -> &mut [u8] {
-    let i: usize = r.inner.core.l_qname as usize + r.cigar_len() * 4 + (r.seq_len() + 1) / 2;
+    let i: usize = r.inner.core.l_qname as usize + r.cigar_len() * 4 + r.seq_len().div_ceil(2);
     let dat_mut = unsafe { slice::from_raw_parts_mut(r.inner().data, r.inner().l_data as usize) };
     &mut dat_mut[i..][..r.seq_len()]
 }

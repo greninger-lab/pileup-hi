@@ -64,21 +64,14 @@ impl Realigner {
 
         match reference {
             AlignerReference::Fasta(file) => {
-                aligner = aligner_build
-                    .with_index(file, None)
-                    .map_err(|e| Error::msg(e))?
+                aligner = aligner_build.with_index(file, None).map_err(Error::msg)?
             }
             AlignerReference::Sequence(bytes) => {
-                aligner = aligner_build.with_seq(bytes).map_err(|e| Error::msg(e))?
+                aligner = aligner_build.with_seq(bytes).map_err(Error::msg)?
             }
         };
 
-        let refname = refname
-            .unwrap_or("REF")
-            .as_bytes()
-            .iter()
-            .map(|x| *x)
-            .collect();
+        let refname = refname.unwrap_or("REF").as_bytes().to_vec();
 
         let mut header = Header::new();
         aligner.populate_header(&mut header);
@@ -92,9 +85,7 @@ impl Realigner {
     }
 
     pub fn build_empty() -> Result<Self, Error> {
-        let aligner = Aligner::builder()
-            .with_seq(b"ACT")
-            .map_err(|e| Error::msg(e))?;
+        let aligner = Aligner::builder().with_seq(b"ACT").map_err(Error::msg)?;
 
         Ok(Self {
             aligner,
@@ -124,13 +115,13 @@ impl Realigner {
         Ok(())
     }
 
-    pub fn realign_region_record(&mut self, records: &mut Vec<Record>) -> Result<(), Error> {
+    pub fn realign_region_record(&mut self, records: &mut [Record]) -> Result<(), Error> {
         let mut aln: Record;
         let mut maps: Vec<Record> = vec![];
         let header = self.headerview.as_ref().unwrap();
 
         for rec in records.iter_mut() {
-            self.realign(&rec, &header, &mut maps)?;
+            self.realign(rec, header, &mut maps)?;
             if maps.is_empty() {
                 continue;
             }
@@ -142,7 +133,7 @@ impl Realigner {
         Ok(())
     }
 
-    pub fn realign_region_plp(&mut self, pileups: &mut Vec<AlignmentRef>) -> Result<(), Error> {
+    pub fn realign_region_plp(&mut self, pileups: &mut [AlignmentRef]) -> Result<(), Error> {
         let mut aln: Record;
         let mut maps: Vec<Record> = vec![];
         let header = self.headerview.as_ref().unwrap();
@@ -210,7 +201,7 @@ mod tests {
             .iter()
             .map(|r| {
                 let mut record = Record::new();
-                record.set(b"4", None, r, vec![255 as u8; r.len()].as_slice());
+                record.set(b"4", None, r, vec![255_u8; r.len()].as_slice());
                 record
             })
             .collect();

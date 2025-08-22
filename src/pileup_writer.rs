@@ -35,7 +35,7 @@ pub fn get_base_to_ref(cur_base: u8, ref_base: u8, is_reverse: bool) -> Result<u
             return Ok(F_MATCH);
         }
     }
-    return Ok(get_base(cur_base, is_reverse));
+    Ok(get_base(cur_base, is_reverse))
 }
 
 /// Class with methods to write pileup information output to stdout/file that is meant to be
@@ -146,7 +146,7 @@ impl PileupWriter {
             self.qual_buf.clear();
         }
 
-        print! {"\n"}
+        println! {};
 
         Ok(())
     }

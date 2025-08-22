@@ -72,10 +72,7 @@ impl IterCigarMatches {
         if self.cigar_index <= 1 {
             false
         } else {
-            match self.cigar[self.cigar_index - 2] {
-                Cigar::Del(_) => true,
-                _ => false,
-            }
+            matches!(self.cigar[self.cigar_index - 2], Cigar::Del(_))
         }
     }
 
@@ -120,7 +117,7 @@ fn test_walk2() {
 
     let mut ret = vec![];
 
-    while let Some(next) = walker.next() {
+    for next in walker.by_ref() {
         ret.push(next);
     }
 
@@ -163,7 +160,7 @@ fn test_walk3() {
 
     let mut ret = vec![];
 
-    while let Some(next) = walker.next() {
+    for next in walker.by_ref() {
         ret.push(next);
     }
 

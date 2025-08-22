@@ -1,5 +1,5 @@
+use crate::alignment::{cigar2rlen, Alignment, AlignmentRef, CigarState};
 use crate::overlap::{MapOverlaps, OverlapMap};
-use crate::alignment::{cigar2rlen, CigarState, Alignment, AlignmentRef};
 use rust_htslib::bam::Record;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
@@ -31,8 +31,8 @@ impl ReadBuffer {
             return BufPushResult::DifferentReference;
         }
 
-        if cigar2rlen(&r) > self.len {
-            self.len = cigar2rlen(&r);
+        if cigar2rlen(r) > self.len {
+            self.len = cigar2rlen(r);
         }
 
         if r.pos() + self.len - 1 < pos {
@@ -75,7 +75,12 @@ impl ReadBuffer {
     pub fn new(depth: usize, disable_overlaps: bool) -> Self {
         let rbuf: Vec<AlignmentRef> = Vec::with_capacity(500);
         let backup_buf: Vec<AlignmentRef> = Vec::with_capacity(500);
-        let max_depth = depth.cmp(&0).is_eq().then_some(usize::MAX).unwrap_or(depth);
+
+        let max_depth = if depth.cmp(&0).is_eq() {
+            usize::MAX
+        } else {
+            depth
+        };
         let len = 0;
 
         let overlap_map = match disable_overlaps {
