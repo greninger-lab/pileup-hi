@@ -1,6 +1,7 @@
 use crate::bamio::{BamReader, BamWriter};
 use crate::params::Params;
 use crate::pileup_writer::PileupWriter;
+use crate::position_queue::PositionQueue;
 use crate::read_buf;
 use crate::read_filter::ReadFilter;
 use crate::realigner::{AlignerReference, Realigner};
@@ -103,7 +104,7 @@ pub struct PileupIterator {
     realigner: Option<Realigner>,
     show_all: bool,
     pileup_writer: PileupWriter,
-    reader: BamReader,
+    pub reader: BamReader,
     refseq: RefCell<RefSeq>,
     read_filter: ReadFilter,
     cur_rec: Record,
@@ -118,7 +119,7 @@ pub enum IterResult {
 }
 
 impl PileupIterator {
-    pub fn new(params: Params) -> Result<Self, Error> {
+    pub fn new(params: &Params) -> Result<Self, Error> {
         let tid = params.inp.tid.unwrap_or(UNINIT_TID);
         let pos @ next_pos @ max_pos = params.inp.pos.unwrap_or(UNINIT_POS);
         let reader = BamReader::new(&params.inp)?;
@@ -129,8 +130,8 @@ impl PileupIterator {
             false => (PileupPosition::new(false), None),
         };
 
-        let read_discard = match params.outp.output_realigned {
-            Some(output) => RefCell::new(BamWriter::new_from_template(&reader.header, &output)?),
+        let read_discard = match &params.outp.output_realigned {
+            Some(output) => RefCell::new(BamWriter::new_from_template(&reader.header, output)?),
             None => RefCell::new(BamWriter::void(&reader.header)?),
         };
 
@@ -148,8 +149,8 @@ impl PileupIterator {
             params.plp.incl_flags.iter().map(|s| s.as_str()).collect(),
         )?;
 
-        let refseq = match params.inp.refseq {
-            Some(ref_file) => RefCell::new(RefSeq::from_file(ref_file)?),
+        let refseq = match &params.inp.refseq {
+            Some(ref_file) => RefCell::new(RefSeq::from_file(ref_file.clone())?),
             None => RefCell::new(RefSeq::new_empty()),
         };
 
@@ -173,14 +174,19 @@ impl PileupIterator {
         })
     }
 
-    pub fn auto_loop(&mut self) -> Result<(), Error> {
-        self.init_to_ref()?;
+    pub fn _auto_loop(&mut self, queue: &PositionQueue) -> Result<(), Error> {
+        for reg in &queue.queue {
+            self.tid = i32::try_from(reg.tid)?;
+            self.pos = reg.start;
+            self.next_pos = reg.start;
+            self.max_pos = reg.end;
+            self.init_to_ref(false)?;
 
-        loop {
-            match self.next()? {
-                IterResult::NoData => break,
-                IterResult::Generated => continue,
-                IterResult::ReferenceEnd => _ = self.init_to_ref()?,
+            loop {
+                match self.next()? {
+                    IterResult::NoData | IterResult::ReferenceEnd => break,
+                    IterResult::Generated => continue,
+                }
             }
         }
 
@@ -209,6 +215,7 @@ impl PileupIterator {
 
             if read_ends_before_pos(&r.rec, self.pos) {
                 discard.write_record(&r.rec)?;
+                self.rbuf.depth -= 1;
                 continue;
             }
 
@@ -307,12 +314,12 @@ impl PileupIterator {
         Ok(generated)
     }
 
-    pub fn init_to_ref(&mut self) -> Result<IterResult, Error> {
+    pub fn init_to_ref(&mut self, inc: bool) -> Result<IterResult, Error> {
         // todo: check if this works for bam files without refs in header
         //
         if self.tid == UNINIT_TID {
             self.tid = 0;
-        } else {
+        } else if inc {
             self.tid += 1;
         }
 
@@ -326,7 +333,6 @@ impl PileupIterator {
 
         let mut refseq = self.refseq.try_borrow_mut()?;
 
-        // if let Some(r) = self.refseq.as_mut() {
         if !refseq.is_empty() {
             // right now we just get the entire reference sequence.
             // Next step will be to load it in windows.
@@ -341,16 +347,17 @@ impl PileupIterator {
             )?;
         }
 
-        self.max_pos = tlen as i64;
-        self.pos = 0;
         self.next_pos = 0;
 
         Ok(IterResult::Generated)
     }
 
-    /// Iterate over reads until there is either no more input data left or a read mapped to a
-    /// different reference is encountered.
     pub fn next(&mut self) -> Result<IterResult, Error> {
+        while self.pos < self.next_pos {
+            self.set_pileup()?;
+            self.pos += 1;
+        }
+
         while let Some(read) = self.reader.read_no_alloc(&mut self.cur_rec) {
             read?;
             let r = &self.cur_rec;
@@ -363,8 +370,8 @@ impl PileupIterator {
                 continue;
             }
 
-            if r.pos() < self.pos || r.tid() < self.tid {
-                panic!("UNSORTED BAM")
+            if r.tid() != self.tid {
+                panic!();
             }
 
             let ret = self.rbuf.attempt_push(r, self.pos, self.tid);
@@ -379,9 +386,12 @@ impl PileupIterator {
                 read_buf::BufPushResult::Pushed => self.next_pos = r.pos(),
             }
 
-            while self.pos < self.next_pos {
-                self.set_pileup()?;
-                self.pos += 1;
+            if self.next_pos != self.pos && self.next_pos <= self.max_pos {
+                return Ok(IterResult::Generated);
+            }
+
+            if self.next_pos > self.max_pos {
+                break;
             }
         }
 

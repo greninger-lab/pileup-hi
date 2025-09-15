@@ -42,8 +42,11 @@ pub struct InputParams {
     #[arg(index = 1)]
     pub input: String,
 
-    #[arg(short = 't', long = "--threads", default_value_t = num_cpus::get())]
+    #[arg(short = 't', long = "threads", default_value_t = num_cpus::get())]
     pub threads: usize,
+
+    #[arg(short = 'r', long = "region")]
+    pub region: Option<String>,
 
     #[arg(short = 'f', long = "fasta-ref")]
     pub refseq: Option<String>,
@@ -86,15 +89,14 @@ pub struct PileupParams {
 
     #[arg(short = 'Q', long = "min-BQ", default_value_t = 13)]
     pub min_baseq: u8,
-
-    #[arg(short = 'x', long = "disable_overlap_removal")]
-    pub disable_overlap: bool,
+    // #[arg(short = 'x', long = "disable_overlap_removal")]
+    // pub disable_overlap: bool,
     // pub baq: bool,
 }
 
 #[derive(Parser)]
 pub struct OutputParams {
-    #[arg(short = 'C', long = "--output_realigned")]
+    #[arg(short = 'C', long = "output_realigned")]
     pub output_realigned: Option<String>,
     // pub output_ends: bool,
     // pub reverse_del: bool,
