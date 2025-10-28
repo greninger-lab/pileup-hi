@@ -4,6 +4,8 @@ use crate::utils::has_index;
 use anyhow::{Context, Error};
 use rust_htslib::bam::{Format, Header, HeaderView, IndexedReader, Read, Reader, Record, Writer};
 
+const READ_LENGTH_SAMPLE_SIZE: i8 = 10;
+
 pub struct BamWriter {
     inner: Writer,
     _write_func: fn(&mut Self, &Record) -> Result<(), Error>,
@@ -88,6 +90,33 @@ impl BamReader {
     pub fn init_to_ref(&mut self, tid: u32) -> Result<(), Error> {
         self.cur_ref = std::str::from_utf8(self.header.tid2name(tid))?.to_string();
         self.inner.init_to_ref(tid)
+    }
+
+    pub fn sample_read_length(inp: &InputParams) -> Result<usize, Error> {
+        let mut temp_reader = Self::new(inp)?;
+
+        let mut alloc = Record::new();
+
+        let mut max_read_len: usize = 0;
+
+        let mut reads_to_sample = READ_LENGTH_SAMPLE_SIZE;
+        while reads_to_sample >= 0 {
+            if let Some(r) = temp_reader.read_no_alloc(&mut alloc) {
+                r?;
+                max_read_len = std::cmp::max(max_read_len, alloc.seq_len());
+                reads_to_sample -= 1;
+            }
+        }
+
+        if reads_to_sample == READ_LENGTH_SAMPLE_SIZE {
+            anyhow::bail!(
+                "Failed to find any reads to sample for length! Is file {} empty?",
+                inp.input
+            )
+        }
+
+        assert!(max_read_len > 0);
+        return Ok(max_read_len);
     }
 }
 

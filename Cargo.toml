@@ -11,6 +11,7 @@ minimap2 = {version = "0.1.27", features = ["htslib"]}
 num_cpus = "1.16.0"
 rust-htslib = "0.49.0"
 left_align_indel = { path = "left_align_indel" }
+crossbeam = "0.8.4"
 
 [profile.dev]
 overflow-checks = false

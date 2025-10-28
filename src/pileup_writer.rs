@@ -1,4 +1,8 @@
-use crate::alignment::CigarState;
+use crate::{
+    alignment::CigarState,
+    pileup_iterator::{PileupBaseCall, PileupPayload},
+};
+use crossbeam::channel::Sender;
 
 use anyhow::Error;
 use rust_htslib::bam::{ext::BamRecordExtensions, record::Cigar, Record};
@@ -38,14 +42,95 @@ pub fn get_base_to_ref(cur_base: u8, ref_base: u8, is_reverse: bool) -> Result<u
     Ok(get_base(cur_base, is_reverse))
 }
 
-/// Class with methods to write pileup information output to stdout/file that is meant to be
-/// compliant with the default format of samtools mpileup.
 pub struct PileupWriter {
-    qual_buf: Vec<u8>,
-    seq_buf: Vec<u8>,
+    inner: PileupStringType,
 }
 
 impl PileupWriter {
+    pub fn intake(&mut self, p: PileupPayload) -> Result<(), Error> {
+        match &mut self.inner {
+            PileupStringType::InPlace(ref mut s) => s.plp_string.intake(p),
+            PileupStringType::MultiThreaded(ref mut s) => s.plp_string.intake(p),
+        }
+    }
+
+    pub fn write(&mut self) -> Result<(), Error> {
+        match &mut self.inner {
+            PileupStringType::InPlace(ref mut s) => s.plp_string.write_pileup_str(),
+            PileupStringType::MultiThreaded(ref mut s) => {
+                s.out.send(s.plp_string.clone()).map_err(Error::msg)
+            }
+        }
+    }
+
+    pub fn update(&mut self, tid: i32, ref_pos: i64, ref_base: u8, ref_name: String, depth: u32) {
+        match &mut self.inner {
+            PileupStringType::InPlace(ref mut s) => {
+                s.plp_string.update(tid, ref_pos, ref_base, ref_name, depth)
+            }
+            PileupStringType::MultiThreaded(ref mut s) => {
+                s.plp_string.update(tid, ref_pos, ref_base, ref_name, depth)
+            }
+        }
+    }
+}
+
+/// Class with methods to write pileup information output to stdout/file that is meant to be
+/// compliant with the default format of samtools mpileup.
+#[derive(Clone)]
+pub struct PileupString {
+    tid: i32,
+    ref_pos: i64,
+    ref_base: u8,
+    ref_name: String,
+    depth: u32,
+    seq_buf: Vec<u8>,
+    qual_buf: Vec<u8>,
+}
+
+pub enum PileupStringType {
+    InPlace(PileupStringInPlace),
+    MultiThreaded(PileupStringMultiThread),
+}
+
+/// A pileup string that is not copied, and simply printed to stdout once it is considered full.
+/// Should not be used when multiple strings are being developed concurrently.
+pub struct PileupStringInPlace {
+    pub plp_string: PileupString,
+}
+
+pub struct PileupStringMultiThread {
+    pub plp_string: PileupString,
+    out: Sender<PileupString>,
+}
+
+impl PileupString {
+    pub fn intake(&mut self, p: PileupPayload) -> Result<(), Error> {
+        match p.call {
+            PileupBaseCall::Match => {
+                self.write_match(p.rec, p.plp_read_pos as u32, p.plp_ref_pos, p.ref_base)?;
+            }
+
+            PileupBaseCall::DeletionStart => {
+                self.write_match(p.rec, p.plp_read_pos as u32, p.plp_ref_pos, p.ref_base)?;
+                self.write_deletion_start(p.rec, p.aux, p.aux.len() as i64)?;
+            }
+
+            PileupBaseCall::Insertion => {
+                self.write_match(p.rec, p.plp_read_pos as u32, p.plp_ref_pos, p.ref_base)?;
+                self.write_insertion(p.cstate, p.rec, p.plp_read_pos as u32)?;
+            }
+
+            PileupBaseCall::Gap => {
+                self.write_deletion(*p.rec.qual().get(p.plp_read_pos).unwrap_or(&0))
+            }
+
+            PileupBaseCall::NA => (),
+        }
+
+        Ok(())
+    }
+
     pub fn write_match(
         &mut self,
         rec: &Record,
@@ -123,14 +208,8 @@ impl PileupWriter {
         Ok(())
     }
 
-    pub fn write_pileup_str(
-        &mut self,
-        ref_base: u8,
-        plp_ref_pos: i64,
-        depth: u32,
-        tidname: &str,
-    ) -> Result<(), Error> {
-        print! {"{}\t{}\t{}\t{}\t", tidname, plp_ref_pos + 1, char::from(ref_base), depth }
+    pub fn write_pileup_str(&mut self) -> Result<(), Error> {
+        print! {"{}\t{}\t{}\t{}\t", self.ref_name, self.ref_pos + 1, char::from(self.ref_base), self.depth }
 
         if self.seq_buf.is_empty() {
             print! {"*\t"}
@@ -154,6 +233,22 @@ impl PileupWriter {
     pub fn new() -> Self {
         let (seq_buf, qual_buf) = (Vec::with_capacity(500), Vec::with_capacity(500));
 
-        Self { seq_buf, qual_buf }
+        Self {
+            tid: 0,
+            ref_pos: 0,
+            ref_base: 0,
+            ref_name: "".to_string(),
+            depth: 0,
+            seq_buf,
+            qual_buf,
+        }
+    }
+
+    pub fn update(&mut self, tid: i32, ref_pos: i64, ref_base: u8, ref_name: String, depth: u32) {
+        self.tid = tid;
+        self.ref_pos = ref_pos;
+        self.ref_base = ref_base;
+        self.ref_name = ref_name;
+        self.depth = depth;
     }
 }

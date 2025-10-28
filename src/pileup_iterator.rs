@@ -1,6 +1,7 @@
+use crate::alignment::CigarState;
 use crate::bamio::{BamReader, BamWriter};
 use crate::params::Params;
-use crate::pileup_writer::PileupWriter;
+use crate::pileup_writer::PileupString;
 use crate::position_queue::PositionQueue;
 use crate::read_buf;
 use crate::read_filter::ReadFilter;
@@ -15,6 +16,25 @@ use std::cell::RefCell;
 
 pub const UNINIT_POS: i64 = i64::MAX - 1;
 pub const UNINIT_TID: i32 = i32::MAX - 1;
+
+/// Options for a single position of coverage in one read.
+pub enum PileupBaseCall {
+    DeletionStart, // the deleted reference sequence
+    Insertion,     // deletion length, the inserted sequence
+    Gap,           // just empty * (in the middle of a deletion)
+    Match,         // All info necessary to display match
+    NA,            // No information
+}
+
+pub struct PileupPayload<'a> {
+    pub cstate: &'a CigarState,
+    pub rec: &'a Record,
+    pub plp_ref_pos: i64,
+    pub plp_read_pos: usize,
+    pub ref_base: u8,
+    pub call: PileupBaseCall,
+    pub aux: &'a [u8],
+}
 
 /// A counter class to track the number of reads differing from the reference at a given pileup.
 /// Holds the qualities of all bases, and the number of reads with ref-matching vs differing bases.
@@ -103,7 +123,7 @@ pub struct PileupIterator {
     rbuf: read_buf::ReadBuffer,
     realigner: Option<Realigner>,
     show_all: bool,
-    pileup_writer: PileupWriter,
+    pileup_writer: PileupString,
     pub reader: BamReader,
     refseq: RefCell<RefSeq>,
     read_filter: ReadFilter,
@@ -123,7 +143,7 @@ impl PileupIterator {
         let tid = params.inp.tid.unwrap_or(UNINIT_TID);
         let pos @ next_pos @ max_pos = params.inp.pos.unwrap_or(UNINIT_POS);
         let reader = BamReader::new(&params.inp)?;
-        let pileup_writer = PileupWriter::new();
+        let pileup_writer = PileupString::new();
 
         let (store, realigner) = match params.plp.indel_realign {
             true => (PileupPosition::new(true), Some(Realigner::build_empty()?)),
@@ -230,61 +250,101 @@ impl PileupIterator {
                 continue;
             }
 
+            let mut p = PileupPayload {
+                rec: &r.rec,
+                plp_ref_pos: self.pos,
+                plp_read_pos: r.cstate.qpos,
+                ref_base: self.store.ref_base,
+                call: PileupBaseCall::NA,
+                cstate: &r.cstate,
+                aux: b" ",
+            };
+
             if let Some(allele) = ret {
                 match allele {
                     Cigar::Match(_) => {
-                        self.pileup_writer.write_match(
-                            &r.rec,
-                            r.cstate.qpos as u32,
-                            self.pos,
-                            self.store.ref_base,
-                        )?;
-
-                        (self.store.register)(&mut self.store, qual, readbase);
+                        p.call = PileupBaseCall::Match;
+                        (self.store.register)(&mut self.store, qual, readbase)
                     }
 
                     Cigar::Ins(_) => {
-                        self.pileup_writer.write_match(
-                            &r.rec,
-                            r.cstate.qpos as u32,
-                            self.pos,
-                            self.store.ref_base,
-                        )?;
-
-                        self.pileup_writer.write_insertion(
-                            &r.cstate,
-                            &r.rec,
-                            r.cstate.qpos as u32,
-                        )?;
-
+                        p.call = PileupBaseCall::Insertion;
+                        (self.store.register)(&mut self.store, qual, readbase);
                         self.store.nins += 1;
                     }
 
                     Cigar::Del(l) => {
-                        if !r.cstate.del {
-                            self.pileup_writer.write_match(
-                                &r.rec,
-                                r.cstate.qpos as u32,
-                                self.pos,
-                                self.store.ref_base,
-                            )?;
-
-                            let del_seq = refseq.get_interval(
-                                self.pos as u64 + 1,
-                                (self.pos + (l as i64)) as u64,
-                            )?;
-
-                            self.pileup_writer
-                                .write_deletion_start(&r.rec, del_seq, l as i64)?
-                        } else {
-                            self.pileup_writer.write_deletion(qual);
+                        match r.cstate.del {
+                            true => {
+                                p.call = PileupBaseCall::DeletionStart;
+                                p.aux = refseq.get_interval(
+                                    self.pos as u64 + 1,
+                                    (self.pos + (l as i64)) as u64,
+                                )?;
+                            }
+                            false => p.call = PileupBaseCall::Gap,
                         }
-
                         self.store.ndel += 1;
                     }
 
                     _ => panic!("Invalid pileup type found!"),
-                }
+                };
+
+                self.pileup_writer.intake(p);
+                // match allele {
+                //     Cigar::Match(_) => {
+                //         self.pileup_writer.write_match(
+                //             &r.rec,
+                //             r.cstate.qpos as u32,
+                //             self.pos,
+                //             self.store.ref_base,
+                //         )?;
+
+                //         (self.store.register)(&mut self.store, qual, readbase);
+                //     }
+
+                //     Cigar::Ins(_) => {
+                //         self.pileup_writer.write_match(
+                //             &r.rec,
+                //             r.cstate.qpos as u32,
+                //             self.pos,
+                //             self.store.ref_base,
+                //         )?;
+
+                //         self.pileup_writer.write_insertion(
+                //             &r.cstate,
+                //             &r.rec,
+                //             r.cstate.qpos as u32,
+                //         )?;
+
+                //         self.store.nins += 1;
+                //     }
+
+                //     Cigar::Del(l) => {
+                //         if !r.cstate.del {
+                //             self.pileup_writer.write_match(
+                //                 &r.rec,
+                //                 r.cstate.qpos as u32,
+                //                 self.pos,
+                //                 self.store.ref_base,
+                //             )?;
+
+                //             let del_seq = refseq.get_interval(
+                //                 self.pos as u64 + 1,
+                //                 (self.pos + (l as i64)) as u64,
+                //             )?;
+
+                //             self.pileup_writer
+                //                 .write_deletion_start(&r.rec, del_seq, l as i64)?
+                //         } else {
+                //             self.pileup_writer.write_deletion(qual);
+                //         }
+
+                //         self.store.ndel += 1;
+                // }
+
+                // _ => panic!("Invalid pileup type found!"),
+                // }
             }
 
             drop(r);
@@ -294,20 +354,23 @@ impl PileupIterator {
         let depth = self.store.depth();
 
         if self.show_all || depth > 0 {
-            self.pileup_writer.write_pileup_str(
-                self.store.ref_base,
+            self.pileup_writer.update(
+                self.tid,
                 self.pos,
+                self.store.ref_base,
+                self.reader.cur_ref.clone(),
                 depth,
-                &self.reader.cur_ref,
-            )?;
+            );
+
+            self.pileup_writer.write_pileup_str()?;
             generated = true;
         }
 
-        if let Some(realigner) = &mut self.realigner {
-            if let Some(_ratio) = self.store.is_active(0.1, 0.9, depth as f32) {
-                realigner.realign_region_plp(&mut self.rbuf.backup_buf)?;
-            }
-        }
+        // if let Some(realigner) = &mut self.realigner {
+        //     if let Some(_ratio) = self.store.is_active(0.1, 0.9, depth as f32) {
+        //         realigner.realign_region_plp(&mut self.rbuf.backup_buf)?;
+        //     }
+        // }
 
         self.rbuf.reset();
 

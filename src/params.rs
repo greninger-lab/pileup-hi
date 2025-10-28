@@ -1,6 +1,6 @@
 use clap::Parser;
 
-#[derive(Parser)]
+#[derive(Parser, Clone)]
 pub struct Params {
     #[clap(flatten)]
     pub inp: InputParams,
@@ -37,7 +37,7 @@ pub fn parse_or_quit() -> Params {
     }
 }
 
-#[derive(Parser)]
+#[derive(Parser, Clone)]
 pub struct InputParams {
     #[arg(index = 1)]
     pub input: String,
@@ -61,7 +61,7 @@ pub struct InputParams {
     pub depth: usize,
 }
 
-#[derive(Parser)]
+#[derive(Parser, Clone)]
 pub struct PileupParams {
     #[arg(short = 'a')]
     pub show_empty_coords: bool,
@@ -94,7 +94,7 @@ pub struct PileupParams {
     // pub baq: bool,
 }
 
-#[derive(Parser)]
+#[derive(Parser, Clone)]
 pub struct OutputParams {
     #[arg(short = 'C', long = "output_realigned")]
     pub output_realigned: Option<String>,

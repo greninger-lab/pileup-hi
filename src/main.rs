@@ -4,6 +4,7 @@ use anyhow::Error;
 
 mod alignment;
 mod bamio;
+// mod output;
 mod overlap;
 mod params;
 mod pileup_iterator;
@@ -14,6 +15,7 @@ mod read_filter;
 mod read_walker;
 mod realigner;
 mod refseq;
+// mod threading;
 mod utils;
 
 fn _main() -> Result<(), Error> {
