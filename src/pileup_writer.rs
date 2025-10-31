@@ -79,8 +79,8 @@ impl PileupWriter {
             PileupStringType::InPlace(ref mut s) => s.plp_string.write_pileup_str(),
             PileupStringType::MultiThreaded(ref mut s) => {
                 s.out.send(s.plp_string.clone()).map_err(Error::msg)?;
-                s.plp_string.qual_buf.clear();
-                s.plp_string.seq_buf.clear();
+                s.plp_string.qual_buf.shrink_to(0);
+                s.plp_string.seq_buf.shrink_to(0);
                 Ok(())
             }
         }

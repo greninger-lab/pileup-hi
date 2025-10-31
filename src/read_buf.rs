@@ -27,16 +27,18 @@ impl ReadBuffer {
             return BufPushResult::Unmapped;
         }
 
+        if r.pos() + self.len - 1 < pos {
+            return BufPushResult::BeforeWindow;
+        }
+
         if r.tid() != tid {
             return BufPushResult::DifferentReference;
         }
 
-        if cigar2rlen(r) > self.len {
-            self.len = cigar2rlen(r);
-        }
+        let read_len_from_cigar = cigar2rlen(r);
 
-        if r.pos() + self.len - 1 < pos {
-            return BufPushResult::BeforeWindow;
+        if read_len_from_cigar > self.len {
+            self.len = read_len_from_cigar;
         }
 
         if r.tid() == tid && r.pos() == pos && self.depth >= self.max_depth {
@@ -53,6 +55,7 @@ impl ReadBuffer {
             bam_pos: r.pos() as u32,
             qpos: 0,
             del: false,
+            read_len_from_cigar,
         };
 
         let plp = Alignment {

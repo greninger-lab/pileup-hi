@@ -1,5 +1,8 @@
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
 use crate::params::parse_or_quit;
-use crate::position_queue::{create_region_queue, PositionQueue};
+use crate::position_queue::PositionQueue;
 use crate::threading::PileupMultiThreader;
 use anyhow::Error;
 use pileup_iterator::PileupIterator;
@@ -29,6 +32,7 @@ fn _main() -> Result<(), Error> {
         let mut driver = PileupMultiThreader::new(queue, params)?;
         driver.run()?;
     } else {
+        eprintln!("Running in single-thread mode...");
         let mut iterator = PileupIterator::new(&params, None)?;
         iterator._auto_loop(&queue)?;
     }

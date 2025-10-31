@@ -56,7 +56,7 @@ impl BamReader {
             true => {
                 // println! {"Found index for {}.", &params.input}
                 let mut inner = IndexedReader::new(&params.input, params.threads)?;
-                inner.fetch("*")?;
+                inner.fetch(".")?;
                 let header = inner.header().clone();
                 let max_tid = header.target_count() as i32;
                 let cur_ref = "UNINIT".to_string();
@@ -88,9 +88,9 @@ impl BamReader {
         self.inner.read_no_alloc(stored_read)
     }
 
-    pub fn init_to_ref(&mut self, tid: u32) -> Result<(), Error> {
+    pub fn init_to_ref(&mut self, tid: u32, start: i64, end: i64) -> Result<(), Error> {
         self.cur_ref = std::str::from_utf8(self.header.tid2name(tid))?.to_string();
-        self.inner.init_to_ref(tid)
+        self.inner.init_to_ref(tid, start, end)
     }
 
     pub fn sample_read_length(inp: &InputParams) -> Result<usize, Error> {
@@ -126,7 +126,7 @@ impl BamReader {
 
 /// An interface used to allow reading both indexed and un-indexed bams with the same struct.
 pub trait BamRead {
-    fn init_to_ref(&mut self, tid: u32) -> Result<(), Error>;
+    fn init_to_ref(&mut self, tid: u32, start: i64, end: i64) -> Result<(), Error>;
     fn new(input_file: &str, threads: usize) -> Result<Box<Self>, Error>
     where
         Self: Sized;
@@ -135,7 +135,7 @@ pub trait BamRead {
 
 // Standard BAM Reader NO INDEX
 impl BamRead for Reader {
-    fn init_to_ref(&mut self, _tid: u32) -> Result<(), Error> {
+    fn init_to_ref(&mut self, _tid: u32, _start: i64, _end: i64) -> Result<(), Error> {
         Ok(())
     }
 
@@ -156,8 +156,8 @@ impl BamRead for Reader {
 
 // Indexed Bam Reader
 impl BamRead for IndexedReader {
-    fn init_to_ref(&mut self, tid: u32) -> Result<(), Error> {
-        self.fetch((tid, 0, u32::MAX)).context("Failed to fetch")
+    fn init_to_ref(&mut self, tid: u32, start: i64, end: i64) -> Result<(), Error> {
+        self.fetch((tid, start, end)).context("Failed to fetch")
     }
 
     fn new(input_file: &str, threads: usize) -> Result<Box<Self>, Error>

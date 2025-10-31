@@ -12,6 +12,7 @@ pub struct CigarState {
     pub bam_pos: u32, // ref coord of first base
     pub qpos: usize,
     pub del: bool,
+    pub read_len_from_cigar: i64,
 }
 
 pub struct Alignment {

@@ -66,6 +66,7 @@ impl RefSeq {
                 )
             })?;
 
+            self.seq = Vec::with_capacity(usize::try_from(stop - start + 10)?);
             self.wstart = start;
             self.wend = stop;
 

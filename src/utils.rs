@@ -1,9 +1,10 @@
+use crate::alignment::Alignment;
 use crate::alignment::CigarState;
 use anyhow::{Context, Error};
-use rust_htslib::bam::{ext::BamRecordExtensions, record::Cigar, Record};
+use rust_htslib::bam::record::Cigar;
 
-pub fn read_ends_before_pos(rec: &Record, pos: i64) -> bool {
-    rec.reference_end() - 1 < pos
+pub fn read_ends_before_pos(a: &Alignment, pos: i64) -> bool {
+    a.rec.pos() + a.cstate.read_len_from_cigar - 1 < pos
 }
 
 pub fn has_index(bam_file: &str) -> Result<bool, Error> {
@@ -31,7 +32,7 @@ pub fn cigar_get_pos(cs: &mut CigarState, pos: u32) -> Option<Cigar> {
         if cs.icig >= ncig {
             // this should never happen, since we check cigars beforehand to at least end
             // at the queried coordinate, if not pass over it.
-            println! {"{cig}, {} {}", cs.icig, cs.iseq}
+            eprintln! {"Abnormal cigar token with {cig}, {} {}", cs.icig, cs.iseq}
             // return CigarAtPos::BeforePos();
             return None;
         }

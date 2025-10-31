@@ -239,7 +239,7 @@ impl PileupIterator {
         for raw in self.rbuf.rbuf.drain(..) {
             let mut r = raw.borrow_mut();
 
-            if read_ends_before_pos(&r.rec, self.pos) {
+            if read_ends_before_pos(&r, self.pos) {
                 discard.write_record(&r.rec)?;
                 self.rbuf.depth -= 1;
                 continue;
@@ -338,7 +338,8 @@ impl PileupIterator {
             self.tid += 1;
         }
 
-        self.reader.init_to_ref(self.tid as u32)?;
+        self.reader
+            .init_to_ref(self.tid as u32, self.pos, self.max_pos)?;
 
         let tlen = self
             .reader
@@ -368,7 +369,6 @@ impl PileupIterator {
     }
 
     pub fn next(&mut self) -> Result<IterResult, Error> {
-        // println! {"SELF POS: {}", self.pos};
         while self.pos < self.next_pos {
             self.set_pileup()?;
             self.pos += 1;
@@ -460,6 +460,7 @@ mod tests {
             bam_pos: 1,
             qpos: 0,
             del: false,
+            read_len_from_cigar: 0,
         };
 
         let mut ret = cigar_get_pos(&mut cstate, 4);
@@ -492,6 +493,7 @@ mod tests {
             bam_pos: 104,
             qpos: 0,
             del: false,
+            read_len_from_cigar: 0,
         };
 
         let mut ret = cigar_get_pos(&mut cstate, 107);
@@ -528,6 +530,7 @@ mod tests {
             bam_pos: 104,
             qpos: 0,
             del: false,
+            read_len_from_cigar: 0,
         };
 
         let mut ret = cigar_get_pos(&mut cstate, 104);

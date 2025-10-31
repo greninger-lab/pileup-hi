@@ -78,6 +78,11 @@ impl GenomeInterval {
     pub fn chunks(&self, chunk_size: i64) -> GenomeIntervalIterator<'_> {
         GenomeIntervalIterator::new(self, chunk_size)
     }
+
+    #[allow(dead_code)]
+    pub fn n_chunks(&self, n_chunks: i64) -> GenomeIntervalIterator<'_> {
+        GenomeIntervalIterator::new(self, (self.end - self.start + 1) / n_chunks + 1)
+    }
 }
 
 /// Parse any string for being compliant for the SAM region format, e.g.
