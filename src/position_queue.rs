@@ -161,6 +161,10 @@ impl PositionQueue {
         Ok(Self { queue })
     }
 
+    pub fn len(&self) -> usize {
+        self.queue.len()
+    }
+
     /// Create a position queue from a list of pileup regions, validating to make sure they agree
     /// with the given SAM header.
     pub fn new_from_regions(

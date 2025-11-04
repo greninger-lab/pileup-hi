@@ -12,17 +12,7 @@ pub struct Params {
     pub outp: OutputParams,
 }
 
-pub fn validate_params(p: &Params) {
-    if p.plp.indel_realign && p.inp.refseq.is_none() {
-        eprintln! {"You must provide a reference fasta when enabling indel realignment."};
-        std::process::exit(1);
-    }
-
-    if !p.plp.indel_realign && p.outp.output_realigned.is_some() {
-        eprintln! {"Indel realignment must be enabled when choosing to output realigned bam."}
-        std::process::exit(1);
-    }
-}
+pub fn validate_params(p: &Params) {}
 
 pub fn parse_or_quit() -> Params {
     match Params::try_parse() {
@@ -40,25 +30,10 @@ pub fn parse_or_quit() -> Params {
 #[derive(Parser, Clone)]
 pub struct InputParams {
     #[arg(index = 1)]
-    pub input: String,
-
-    #[arg(short = 't', long = "threads", default_value_t = num_cpus::get())]
-    pub threads: usize,
+    pub file: String,
 
     #[arg(short = 'r', long = "region")]
     pub region: Option<String>,
-
-    #[arg(short = 'f', long = "fasta-ref")]
-    pub refseq: Option<String>,
-
-    #[arg(long = "tid")]
-    pub tid: Option<i32>,
-
-    #[arg(long = "pos")]
-    pub pos: Option<i64>,
-
-    #[arg(short = 'd', long = "depth", default_value_t = 8000)]
-    pub depth: usize,
 }
 
 #[derive(Parser, Clone)]
@@ -66,8 +41,17 @@ pub struct PileupParams {
     #[arg(short = 'a')]
     pub show_empty_coords: bool,
 
+    #[arg(short = 'f', long = "fasta-ref")]
+    pub refseq: Option<String>,
+
+    #[arg(short = 't', long = "threads", default_value_t = num_cpus::get())]
+    pub threads: usize,
+
     #[arg(short = 'i', long = "realign-indels")]
     pub indel_realign: bool,
+
+    #[arg(short = 'd', long = "depth", default_value_t = 8000)]
+    pub depth: usize,
 
     #[arg(long = "aa")]
     pub show_everything: bool,

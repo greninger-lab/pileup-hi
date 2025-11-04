@@ -1,5 +1,4 @@
 #![allow(dead_code)]
-// use crate::alignment::Pileup;
 use crate::alignment::Alignment;
 use crate::read_walker::WalkMatches;
 use anyhow::Error;

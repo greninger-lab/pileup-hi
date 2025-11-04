@@ -1,45 +1,37 @@
-use crate::params::InputParams;
 use crate::utils::has_index;
 
 use anyhow::{Context, Error};
-use rust_htslib::bam::{Format, Header, HeaderView, IndexedReader, Read, Reader, Record, Writer};
+use rust_htslib::bam::{HeaderView, IndexedReader, Read, Reader, Record};
+use std::path;
 
 const READ_LENGTH_SAMPLE_SIZE: i8 = 10;
 
-pub struct BamWriter {
-    inner: Writer,
-    _write_func: fn(&mut Self, &Record) -> Result<(), Error>,
+#[derive(Clone)]
+pub enum BamDataSource {
+    File(std::path::PathBuf),
+    Stdin,
 }
 
-// TODO: consider the overhead of using Option<Writer>. Wondering if it would be better to use
-// function pointer to write nothing instead.
-impl BamWriter {
-    pub fn new_from_template(header: &HeaderView, output: &str) -> Result<Self, Error> {
-        let header = Header::from_template(header);
-        let inner = Writer::from_path(std::path::Path::new(output), &header, Format::Bam)?;
-        let _write_func = Self::_write_read;
-
-        Ok(Self { inner, _write_func })
+impl BamDataSource {
+    pub fn from_string(s: &str) -> Result<Self, Error> {
+        if s == "-" {
+            return Ok(Self::Stdin);
+        } else {
+            if path::Path::exists(path::Path::new(s)) {
+                return Ok(Self::File(path::PathBuf::from(s)));
+            } else {
+                anyhow::bail!("Input path {} not found!", s)
+            }
+        }
     }
+}
 
-    pub fn write_record(&mut self, record: &Record) -> Result<(), Error> {
-        // I have to do this wierd Ok() wrapping because Result<()> return type
-        (self._write_func)(self, record)
-    }
-
-    pub fn void(header: &HeaderView) -> Result<Self, Error> {
-        let header = Header::from_template(header);
-        let inner = Writer::from_path(std::path::Path::new("/dev/null"), &header, Format::Sam)?;
-        let _write_func = Self::_discard_read;
-
-        Ok(Self { inner, _write_func })
-    }
-
-    fn _discard_read(&mut self, _rec: &Record) -> Result<(), Error> {
-        Ok(())
-    }
-    fn _write_read(&mut self, rec: &Record) -> Result<(), Error> {
-        Ok(self.inner.write(rec)?)
+impl std::fmt::Display for BamDataSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::File(f) => f.to_str().unwrap_or("FILE"),
+            Self::Stdin => "STDIN",
+        })
     }
 }
 
@@ -51,38 +43,37 @@ pub struct BamReader {
 }
 
 impl BamReader {
-    pub fn new(params: &InputParams) -> Result<Self, Error> {
-        match has_index(&params.input)? {
-            true => {
-                // println! {"Found index for {}.", &params.input}
-                let mut inner = IndexedReader::new(&params.input, params.threads)?;
-                inner.fetch(".")?;
-                let header = inner.header().clone();
-                let max_tid = header.target_count() as i32;
-                let cur_ref = "UNINIT".to_string();
-                Ok(Self {
-                    inner,
-                    header,
-                    max_tid,
-                    cur_ref,
-                })
-            }
+    pub fn new(src: &BamDataSource, threads: usize) -> Result<Self, Error> {
+        let inner: Box<dyn BamRead> = match &src {
+            BamDataSource::File(file) => match has_index(file.to_str().unwrap())? {
+                true => {
+                    let mut inner = IndexedReader::new(src, threads)?;
+                    inner.fetch(".")?;
+                    inner
+                }
 
-            false => {
-                // println! {"No index found for {}. Using slower iteration...", &params.input}
-                let inner = Reader::new(&params.input, params.threads)?;
-                let header = inner.header().clone();
-                let max_tid = header.target_count() as i32;
-                let cur_ref = "UNINIT".to_string();
-                Ok(Self {
-                    inner,
-                    header,
-                    max_tid,
-                    cur_ref,
-                })
-            }
-        }
+                false => Reader::new(src, threads)?,
+            },
+
+            BamDataSource::Stdin => Reader::new(src, threads)?,
+        };
+
+        let header = inner.get_header().clone();
+        let max_tid = (header.target_count() - 1) as i32;
+        let cur_ref = "UNINIT".to_string();
+
+        Ok(Self {
+            inner,
+            header,
+            max_tid,
+            cur_ref,
+        })
     }
+
+    // pub fn get_n_tids(src: &BamDataSource) -> Result<u32, Error> {
+    //     let r = Reader::new(src, 1)?;
+    //     Ok(r.get_header().target_count())
+    // }
 
     pub fn read_no_alloc(&mut self, stored_read: &mut Record) -> Option<Result<(), Error>> {
         self.inner.read_no_alloc(stored_read)
@@ -93,8 +84,8 @@ impl BamReader {
         self.inner.init_to_ref(tid, start, end)
     }
 
-    pub fn sample_read_length(inp: &InputParams) -> Result<usize, Error> {
-        let mut temp_reader = Self::new(inp)?;
+    pub fn sample_read_length(src: &BamDataSource) -> Result<usize, Error> {
+        let mut temp_reader = Self::new(src, 1)?;
 
         let mut alloc = Record::new();
 
@@ -115,7 +106,7 @@ impl BamReader {
         if reads_to_sample == READ_LENGTH_SAMPLE_SIZE {
             anyhow::bail!(
                 "Failed to find any reads to sample for length! Is file {} empty?",
-                inp.input
+                src
             )
         }
 
@@ -127,7 +118,8 @@ impl BamReader {
 /// An interface used to allow reading both indexed and un-indexed bams with the same struct.
 pub trait BamRead {
     fn init_to_ref(&mut self, tid: u32, start: i64, end: i64) -> Result<(), Error>;
-    fn new(input_file: &str, threads: usize) -> Result<Box<Self>, Error>
+    fn get_header(&self) -> &HeaderView;
+    fn new(src: &BamDataSource, threads: usize) -> Result<Box<Self>, Error>
     where
         Self: Sized;
     fn read_no_alloc(&mut self, stored_read: &mut Record) -> Option<Result<(), Error>>;
@@ -139,11 +131,23 @@ impl BamRead for Reader {
         Ok(())
     }
 
-    fn new(input_file: &str, threads: usize) -> Result<Box<Self>, Error>
+    fn get_header(&self) -> &HeaderView {
+        self.header()
+    }
+
+    fn new(src: &BamDataSource, threads: usize) -> Result<Box<Self>, Error>
     where
         Self: Sized,
     {
-        let mut ret = Self::from_path(input_file)?;
+        let mut ret;
+        match src {
+            BamDataSource::File(f) => {
+                ret = Self::from_path(f)?;
+            }
+            BamDataSource::Stdin => {
+                ret = Self::from_stdin()?;
+            }
+        }
         ret.set_threads(threads)?;
         Ok(Box::new(ret))
     }
@@ -160,11 +164,23 @@ impl BamRead for IndexedReader {
         self.fetch((tid, start, end)).context("Failed to fetch")
     }
 
-    fn new(input_file: &str, threads: usize) -> Result<Box<Self>, Error>
+    fn get_header(&self) -> &HeaderView {
+        self.header()
+    }
+
+    fn new(src: &BamDataSource, threads: usize) -> Result<Box<Self>, Error>
     where
         Self: Sized,
     {
-        let mut ret = Self::from_path(input_file)?;
+        let mut ret;
+        match src {
+            BamDataSource::File(f) => {
+                ret = Self::from_path(f)?;
+            }
+            BamDataSource::Stdin => {
+                anyhow::bail!("Attempted to create indexed reader from stdout!")
+            }
+        }
         ret.set_threads(threads)?;
         Ok(Box::new(ret))
     }

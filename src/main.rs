@@ -2,10 +2,8 @@
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 use crate::params::parse_or_quit;
-use crate::position_queue::PositionQueue;
-use crate::threading::PileupMultiThreader;
+use crate::threading::PileupEngine;
 use anyhow::Error;
-use pileup_iterator::PileupIterator;
 
 mod alignment;
 mod bamio;
@@ -18,7 +16,7 @@ mod position_queue;
 mod read_buf;
 mod read_filter;
 mod read_walker;
-mod realigner;
+mod record;
 mod refseq;
 mod threading;
 mod utils;
@@ -26,16 +24,8 @@ mod utils;
 fn _main() -> Result<(), Error> {
     let params = parse_or_quit();
 
-    let queue = PositionQueue::new_from_bam(&params.inp.input)?;
-
-    if params.inp.threads > 1 {
-        let mut driver = PileupMultiThreader::new(queue, params)?;
-        driver.run()?;
-    } else {
-        eprintln!("Running in single-thread mode...");
-        let mut iterator = PileupIterator::new(&params, None)?;
-        iterator._auto_loop(&queue)?;
-    }
+    let mut engine = PileupEngine::initialize(params.inp, params.plp)?;
+    engine.run()?;
 
     Ok(())
 }

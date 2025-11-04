@@ -1,13 +1,15 @@
-use crate::alignment::CigarState;
-use crate::bamio::{BamReader, BamWriter};
-use crate::params::Params;
-use crate::pileup_writer::{PileupString, PileupWriter};
-use crate::position_queue::PositionQueue;
-use crate::read_buf;
-use crate::read_filter::ReadFilter;
-use crate::realigner::{AlignerReference, Realigner};
-use crate::refseq::RefSeq;
-use crate::utils::{cigar_get_pos, read_ends_before_pos};
+use crate::{
+    alignment::CigarState,
+    bamio::{BamDataSource, BamReader},
+    params::PileupParams,
+    pileup_writer::{PileupString, PileupWriter},
+    position_queue::PositionQueue,
+    read_buf::{BufPushResult, ReadBuffer},
+    read_filter::ReadFilter,
+    refseq::RefSeq,
+    utils::{cigar_get_pos, read_ends_before_pos},
+};
+
 use crossbeam::channel::Sender;
 
 use anyhow::{Context, Error};
@@ -115,22 +117,19 @@ impl PileupPosition {
 /// Maintains a buffer of pileups, iterator state (current reference and position), and
 /// auxiliary structs needed for variant detection and output.
 pub struct PileupIterator {
-    pub tid: i32,
-    pub pos: i64,
+    tid: i32,
+    pos: i64,
     next_pos: i64,
     pub max_pos: i64,
     store: PileupPosition,
-    tid_count: i32,
-    rbuf: read_buf::ReadBuffer,
-    realigner: Option<Realigner>,
-    show_all: bool,
+    rbuf: ReadBuffer,
     pileup_writer: PileupWriter,
     pub reader: BamReader,
     refseq: RefCell<RefSeq>,
     read_filter: ReadFilter,
     cur_rec: Record,
+    show_all: bool,
     min_baseq: u8,
-    read_discard: RefCell<BamWriter>,
 }
 
 pub enum IterResult {
@@ -140,20 +139,14 @@ pub enum IterResult {
 }
 
 impl PileupIterator {
-    pub fn new(params: &Params, out_handle: Option<Sender<PileupString>>) -> Result<Self, Error> {
-        let tid = params.inp.tid.unwrap_or(UNINIT_TID);
-        let pos @ next_pos @ max_pos = params.inp.pos.unwrap_or(UNINIT_POS);
-        let reader = BamReader::new(&params.inp)?;
+    pub fn new(
+        src: &BamDataSource,
+        params: &PileupParams,
+        out_handle: Option<Sender<PileupString>>,
+    ) -> Result<Self, Error> {
+        let reader = BamReader::new(src, num_cpus::get())?;
 
-        let (store, realigner) = match params.plp.indel_realign {
-            true => (PileupPosition::new(true), Some(Realigner::build_empty()?)),
-            false => (PileupPosition::new(false), None),
-        };
-
-        let read_discard = match &params.outp.output_realigned {
-            Some(output) => RefCell::new(BamWriter::new_from_template(&reader.header, output)?),
-            None => RefCell::new(BamWriter::void(&reader.header)?),
-        };
+        let store = PileupPosition::new(false);
 
         let pileup_writer = if let Some(output_handle) = out_handle {
             PileupWriter::new_multi(output_handle)
@@ -161,21 +154,24 @@ impl PileupIterator {
             PileupWriter::new_inplace()
         };
 
-        let rbuf = read_buf::ReadBuffer::new(params.inp.depth, params.plp.disable_overlaps);
-
-        let show_all = params.plp.show_empty_coords;
-        let cur_rec = Record::new();
-        let min_baseq = params.plp.min_baseq;
-        let max_tid = reader.max_tid;
+        let rbuf = ReadBuffer::new(params.depth, params.disable_overlaps);
 
         let read_filter = ReadFilter::new(
-            params.plp.min_mapq,
-            params.plp.count_orphans,
-            params.plp.excl_flags.iter().map(|s| s.as_str()).collect(),
-            params.plp.incl_flags.iter().map(|s| s.as_str()).collect(),
+            params.min_mapq,
+            params.count_orphans,
+            params.excl_flags.iter().map(|s| s.as_str()).collect(),
+            params.incl_flags.iter().map(|s| s.as_str()).collect(),
         )?;
 
-        let refseq = match &params.inp.refseq {
+        let cur_rec = Record::new();
+
+        let tid = UNINIT_TID;
+        let pos @ next_pos @ max_pos = UNINIT_POS;
+
+        let show_all = params.show_empty_coords;
+        let min_baseq = params.min_baseq;
+
+        let refseq = match &params.refseq {
             Some(ref_file) => RefCell::new(RefSeq::from_file(ref_file.clone())?),
             None => RefCell::new(RefSeq::new_empty()),
         };
@@ -184,19 +180,16 @@ impl PileupIterator {
             tid,
             pos,
             next_pos,
-            realigner,
             max_pos,
-            tid_count: max_tid,
             rbuf,
             pileup_writer,
             reader,
             store,
-            min_baseq,
-            read_discard,
             read_filter,
-            show_all,
             refseq,
             cur_rec,
+            min_baseq,
+            show_all,
         })
     }
 
@@ -234,13 +227,11 @@ impl PileupIterator {
 
         self.establish_position_context()?;
         let mut refseq = self.refseq.borrow_mut();
-        let mut discard = self.read_discard.borrow_mut();
 
         for raw in self.rbuf.rbuf.drain(..) {
             let mut r = raw.borrow_mut();
 
             if read_ends_before_pos(&r, self.pos) {
-                discard.write_record(&r.rec)?;
                 self.rbuf.depth -= 1;
                 continue;
             }
@@ -318,12 +309,6 @@ impl PileupIterator {
             generated = true;
         }
 
-        // if let Some(realigner) = &mut self.realigner {
-        //     if let Some(_ratio) = self.store.is_active(0.1, 0.9, depth as f32) {
-        //         realigner.realign_region_plp(&mut self.rbuf.backup_buf)?;
-        //     }
-        // }
-
         self.rbuf.reset();
 
         Ok(generated)
@@ -353,14 +338,6 @@ impl PileupIterator {
             // right now we just get the entire reference sequence.
             // Next step will be to load it in windows.
             refseq.load_seq(&self.reader.cur_ref, 0, tlen)?
-        }
-
-        if let Some(realigner) = &mut self.realigner {
-            assert!(!refseq.is_empty());
-            realigner.init_to_ref(
-                AlignerReference::Sequence(refseq.yield_seq_slice()),
-                Some(&self.reader.cur_ref),
-            )?;
         }
 
         self.next_pos = 0;
@@ -397,15 +374,13 @@ impl PileupIterator {
             let ret = self.rbuf.attempt_push(r, self.pos, self.tid);
 
             match ret {
-                read_buf::BufPushResult::Unmapped => panic!(),
-                read_buf::BufPushResult::DifferentReference => return Ok(IterResult::ReferenceEnd),
+                BufPushResult::Unmapped => panic!(),
+                BufPushResult::DifferentReference => return Ok(IterResult::ReferenceEnd),
 
                 // if we hit depth limit, we exhaust all reads at this position to avoid dealing
                 // with them at self.pos + 1.
-                read_buf::BufPushResult::MaxDepthMet | read_buf::BufPushResult::BeforeWindow => {
-                    continue
-                }
-                read_buf::BufPushResult::Pushed => self.next_pos = r.pos(),
+                BufPushResult::MaxDepthMet | BufPushResult::BeforeWindow => continue,
+                BufPushResult::Pushed => self.next_pos = r.pos(),
             }
 
             if self.next_pos != self.pos && self.next_pos <= self.max_pos {
@@ -422,10 +397,12 @@ impl PileupIterator {
             self.pos += 1;
         }
 
-        match self.tid + 1 == self.tid_count {
-            true => Ok(IterResult::NoData),
-            false => Ok(IterResult::ReferenceEnd),
-        }
+        Ok(IterResult::NoData)
+
+        // match self.tid + 1 == self.tid_count {
+        //     true => Ok(IterResult::NoData),
+        //     false => Ok(IterResult::ReferenceEnd),
+        // }
     }
 }
 
