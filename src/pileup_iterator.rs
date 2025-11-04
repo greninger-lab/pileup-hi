@@ -213,18 +213,44 @@ impl PileupIterator {
     /// iterator's current reference position.
     pub fn set_pileup(&mut self) -> Result<bool, Error> {
         assert!(self.rbuf.backup_buf.is_empty());
+
+        // don't bother going through read buffer if it starts beyond the
+        // current coordinate
+        if self.rbuf.start() > self.pos {
+            return Ok(false);
+        }
+
         let mut generated = false;
+        let mut skip_remainder_of_buf = false;
 
         self.establish_position_context()?;
         let mut refseq = self.refseq.borrow_mut();
 
         for raw in self.rbuf.rbuf.drain(..) {
+            // from a previous record, we decided to skip all remaining records in this buffer.
+            if skip_remainder_of_buf {
+                self.rbuf.backup_buf.push(raw);
+                continue;
+            }
+
             let mut r = raw.borrow_mut();
 
+            // record starts beyond position, which means that the remainder of the buffer does
+            // too. Skip the rest of the records.
+            if r.rec.pos() > self.pos {
+                drop(r);
+                self.rbuf.backup_buf.push(raw);
+                skip_remainder_of_buf = true;
+                continue;
+            }
+
+            // record is old and no longer overlaps the query coordinate. Discard.
             if read_ends_before_pos(&r, self.pos) {
                 self.rbuf.depth -= 1;
                 continue;
             }
+
+            generated = true;
 
             // advance to the current ref position in read and record cigar op
             let ret = cigar_get_pos(&mut r.cstate, self.pos as u32);
@@ -256,20 +282,20 @@ impl PileupIterator {
 
                     Cigar::Ins(_) => {
                         p.call = PileupBaseCall::Insertion;
-                        (self.store.register)(&mut self.store, qual, readbase);
+                        // (self.store.register)(&mut self.store, qual, readbase);
                         self.store.nins += 1;
                     }
 
                     Cigar::Del(l) => {
                         match r.cstate.del {
-                            true => {
+                            false => {
                                 p.call = PileupBaseCall::DeletionStart;
                                 p.aux = refseq.get_interval(
                                     self.pos as u64 + 1,
                                     (self.pos + (l as i64)) as u64,
                                 )?;
                             }
-                            false => p.call = PileupBaseCall::Gap,
+                            true => p.call = PileupBaseCall::Gap,
                         }
                         self.store.ndel += 1;
                     }
@@ -286,7 +312,7 @@ impl PileupIterator {
 
         let depth = self.store.depth();
 
-        if self.show_all || depth > 0 {
+        if depth > 0 || generated || self.show_all {
             self.pileup_writer.update(
                 self.tid,
                 self.pos,

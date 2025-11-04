@@ -101,6 +101,14 @@ impl ReadBuffer {
         }
     }
 
+    pub fn start(&self) -> i64 {
+        if let Some(r) = self.rbuf.first() {
+            r.borrow().rec.pos()
+        } else {
+            i64::MAX
+        }
+    }
+
     pub fn reset(&mut self) {
         assert!(self.rbuf.is_empty());
         std::mem::swap(&mut self.rbuf, &mut self.backup_buf);
