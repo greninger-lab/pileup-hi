@@ -15,6 +15,9 @@ const FIRST_POS: u8 = b'^';
 const F_MATCH: u8 = b'.';
 const R_MATCH: u8 = b',';
 
+const F_REFSKIP: u8 = b'>';
+const R_REFSKIP: u8 = b'<';
+
 pub fn get_base(mut cur_base: u8, is_reverse: bool) -> u8 {
     match is_reverse {
         false => cur_base.make_ascii_uppercase(),
@@ -139,6 +142,10 @@ impl PileupString {
                 self.write_deletion_start(p.rec, p.aux, p.aux.len() as i64)?;
             }
 
+            PileupBaseCall::RefSkip => {
+                self.write_refskip(p.rec, p.plp_read_pos as u32, p.plp_ref_pos, p.ref_base)?;
+            }
+
             PileupBaseCall::Insertion => {
                 self.write_match(p.rec, p.plp_read_pos as u32, p.plp_ref_pos, p.ref_base)?;
                 self.write_insertion(p.cstate, p.rec, p.plp_read_pos as u32)?;
@@ -150,6 +157,28 @@ impl PileupString {
 
             PileupBaseCall::NA => (),
         }
+
+        Ok(())
+    }
+
+    pub fn write_refskip(
+        &mut self,
+        rec: &Record,
+        plp_read_idx: u32,
+        _plp_ref_pos: i64,
+        _ref_base: u8,
+    ) -> Result<(), Error> {
+        let qual = get_qual(rec.qual()[plp_read_idx as usize]);
+
+        let sym = if rec.is_reverse() {
+            R_REFSKIP
+        } else {
+            F_REFSKIP
+        };
+
+        // self.seq_buf.push(base);
+        self.seq_buf.push(sym);
+        self.qual_buf.push(qual);
 
         Ok(())
     }

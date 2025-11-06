@@ -27,10 +27,6 @@ impl ReadBuffer {
             return BufPushResult::Unmapped;
         }
 
-        if r.pos() + self.len - 1 < pos {
-            return BufPushResult::BeforeWindow;
-        }
-
         if r.tid() != tid {
             return BufPushResult::DifferentReference;
         }

@@ -93,7 +93,12 @@ pub fn cigar_get_pos(cs: &mut CigarState, pos: u32) -> Option<Cigar> {
                 }
 
                 // return CigarAtPos::BaseEmpty();
-                return None;
+                return Some(op);
+            }
+
+            Cigar::HardClip(l) => {
+                cs.icig += 1;
+                continue;
             }
             _ => (),
         }

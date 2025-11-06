@@ -26,7 +26,8 @@ pub enum PileupBaseCall {
     Insertion,     // deletion length, the inserted sequence
     Gap,           // just empty * (in the middle of a deletion)
     Match,         // All info necessary to display match
-    NA,            // No information
+    RefSkip,
+    NA, // No information
 }
 
 pub struct PileupPayload<'a> {
@@ -284,6 +285,11 @@ impl PileupIterator {
                         p.call = PileupBaseCall::Insertion;
                         // (self.store.register)(&mut self.store, qual, readbase);
                         self.store.nins += 1;
+                    }
+
+                    Cigar::RefSkip(_) => {
+                        p.call = PileupBaseCall::RefSkip;
+                        (self.store.register)(&mut self.store, qual, readbase)
                     }
 
                     Cigar::Del(l) => {

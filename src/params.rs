@@ -27,7 +27,7 @@ pub fn parse_or_quit() -> Params {
 
 #[derive(Parser, Clone)]
 pub struct InputParams {
-    #[arg(index = 1)]
+    // #[arg(index = 1)]
     pub file: String,
 
     #[arg(short = 'r', long = "region")]
