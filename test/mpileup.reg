@@ -11,26 +11,26 @@
 # samtools binary. This can be useful for testing older versions.
 
 # # Create variant formats
-INIT x $samtools view -C mpileup.1.bam > mpileup.1.cram
-INIT x $samtools view -C mpileup.2.bam > mpileup.2.cram
-INIT x $samtools view -C mpileup.3.bam > mpileup.3.cram
-INIT x $samtools index mpileup.1.cram
-INIT x $samtools index mpileup.2.cram
-INIT x $samtools index mpileup.3.cram
-INIT x $samtools view -h mpileup.1.bam > mpileup.1.sam
-INIT x $samtools view -S -b overlap50.sam > overlap50.bam
-INIT x $samtools view -S -C overlap50.sam > overlap50.cram
-INIT x $samtools view -S -b anomalous.sam > anomalous.bam 
-INIT x $samtools view -S -C anomalous.sam > anomalous.cram 
-INIT x $samtools view -S -b indels.sam > indels.bam  
-INIT x $samtools view -S -C indels.sam > indels.cram 
-INIT x gunzip -c expected/1.out.f3-6.gz | $awk -v OFS='\t' '{print "CHROMOSOME_I", NR, $0}' > expected/1.out
-INIT x $samtools view -b -o xx#depth1.bam xx#depth1.sam
-INIT x $samtools view -b -o xx#depth2.bam xx#depth2.sam
-INIT x $samtools view -b -o xx#depth3.bam xx#depth3.sam
-INIT x $samtools index xx#depth1.bam
-INIT x $samtools index xx#depth2.bam
-INIT x $samtools index xx#depth3.bam
+# INIT x $samtools view -C mpileup.1.bam > mpileup.1.cram
+# INIT x $samtools view -C mpileup.2.bam > mpileup.2.cram
+# INIT x $samtools view -C mpileup.3.bam > mpileup.3.cram
+# INIT x $samtools index mpileup.1.cram
+# INIT x $samtools index mpileup.2.cram
+# INIT x $samtools index mpileup.3.cram
+# INIT x $samtools view -h mpileup.1.bam > mpileup.1.sam
+# INIT x $samtools view -S -b overlap50.sam > overlap50.bam
+# INIT x $samtools view -S -C overlap50.sam > overlap50.cram
+# INIT x $samtools view -S -b anomalous.sam > anomalous.bam 
+# INIT x $samtools view -S -C anomalous.sam > anomalous.cram 
+# INIT x $samtools view -S -b indels.sam > indels.bam  
+# INIT x $samtools view -S -C indels.sam > indels.cram 
+# INIT x gunzip -c expected/1.out.f3-6.gz | $awk -v OFS='\t' '{print "CHROMOSOME_I", NR, $0}' > expected/1.out
+# INIT x $samtools view -b -o xx#depth1.bam xx#depth1.sam
+# INIT x $samtools view -b -o xx#depth2.bam xx#depth2.sam
+# INIT x $samtools view -b -o xx#depth3.bam xx#depth3.sam
+# INIT x $samtools index xx#depth1.bam
+# INIT x $samtools index xx#depth2.bam
+# INIT x $samtools index xx#depth3.bam
 
 # Nasty file corner cases
 # P 1.out $samtools mpileup -B -Q0 -x -f ce.fa ce#large_seq.bam 

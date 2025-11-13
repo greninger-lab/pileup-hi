@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use crate::threading::PileupWorkerState;
+use crate::{alignment::PileupAlignment, threading::PileupWorkerState};
 use anyhow::Error;
 use crossbeam::channel::{unbounded, Receiver, Sender};
 const PILEUP_OUTPUT_BUF_PURGE_THRES: usize = 3;
@@ -7,6 +7,7 @@ const PILEUP_OUTPUT_BUF_PURGE_THRES: usize = 3;
 pub trait OrderedPileupOutput {
     fn tid(&self) -> i32;
     fn pos(&self) -> i64;
+    fn intake(&mut self, p: &PileupAlignment, refseq: Option<&[u8]>) -> Result<(), Error>;
     fn write(&mut self) -> Result<(), Error>;
 }
 
@@ -74,8 +75,7 @@ impl<T: OrderedPileupOutput + Send + 'static> PileupOutputAggregator<T> {
                 output_queue.push(out);
 
                 if output_queue.len() >= PILEUP_OUTPUT_BUF_PURGE_THRES {
-                    output_queue
-                        .sort_by(|a, b| a.tid().cmp(&b.tid()).then_with(|| a.pos().cmp(&b.pos())));
+                    output_queue.sort_by(|a, b| a.tid().cmp(&b.tid()).then_with(|| a.pos().cmp(&b.pos())));
 
                     let mut processable_count = 0;
 

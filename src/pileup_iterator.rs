@@ -51,12 +51,6 @@ impl PileupIterator {
         let reader = BamReader::new(src, num_cpus::get())?;
 
         let pileup_writer = PileupString::new();
-        // let pileup_writer = if let Some(output_handle) = out_handle {
-        //     PileupWriter::new_multi(output_handle)
-        // } else {
-        //     PileupWriter::new_inplace()
-        // };
-
         let rbuf = ReadBuffer::new(params.depth, params.disable_overlaps);
 
         let read_filter = ReadFilter::new(
@@ -192,7 +186,6 @@ impl PileupIterator {
 
     pub fn init_to_ref(&mut self, inc: bool) -> Result<IterResult, Error> {
         // todo: check if this works for bam files without refs in header
-        //
         if self.tid == UNINIT_TID {
             self.tid = 0;
         } else if inc {
@@ -201,7 +194,6 @@ impl PileupIterator {
 
         self.reader.init_to_ref(self.tid as u32, self.pos, self.max_pos)?;
 
-        // let mut refseq = self.refseq.try_borrow_mut()?;
         if let Some(refseq) = &mut self.refseq {
             refseq.load_seq(&self.reader.cur_ref)?;
         };

@@ -1,4 +1,5 @@
 use crate::alignment::PileupAlignment;
+use crate::output::OrderedPileupOutput;
 use anyhow::Error;
 use rust_htslib::bam::record::Cigar;
 use std::io::Write;
@@ -19,6 +20,25 @@ pub struct PileupString {
     ref_pos: i64,
     ref_base: u8,
     pub depth: u64,
+    lock: std::io::StdoutLock<'static>,
+}
+
+impl OrderedPileupOutput for PileupString {
+    fn tid(&self) -> i32 {
+        self.tid
+    }
+
+    fn pos(&self) -> i64 {
+        self.ref_pos
+    }
+
+    fn intake(&mut self, p: &PileupAlignment, refseq: Option<&[u8]>) -> Result<(), Error> {
+        self.intake(p, refseq)
+    }
+
+    fn write(&mut self) -> Result<(), Error> {
+        self.write()
+    }
 }
 
 impl PileupString {
@@ -41,30 +61,36 @@ impl PileupString {
         print! {"{}\t{}\t{}\t{}\t", self.ref_name, self.ref_pos + 1, char::from(self.ref_base), self.depth }
 
         if self.seqbuf.is_empty() {
-            print! {"*\t"}
+            write!(self.lock, "*\t")?
+            // print! {"*\t"}
         } else {
-            print! {"{}\t", std::str::from_utf8(&self.seqbuf)?}
+            unsafe {
+                write!(self.lock, "{}\t", std::str::from_utf8_unchecked(&self.seqbuf))?;
+            }
+            // print! {"{}\t", std::str::from_utf8(&self.seqbuf)?}
             self.seqbuf.clear();
         }
 
         if self.qualbuf.is_empty() {
-            print! {"*"}
+            write!(self.lock, "*")?
         } else {
-            print! {"{}", std::str::from_utf8(&self.qualbuf)?}
+            // print! {"{}", std::str::from_utf8(&self.qualbuf)?}
+            unsafe { write!(self.lock, "{}", std::str::from_utf8_unchecked(&self.qualbuf))? }
             self.qualbuf.clear();
         }
 
-        println! {};
+        writeln!(self.lock)?;
 
-        self.seqbuf.clear();
-        self.qualbuf.clear();
         self.depth = 0;
 
         Ok(())
     }
 
     pub fn new() -> Self {
+        let s = std::io::stdout();
+        let lock = s.lock();
         Self {
+            lock,
             tid: 0,
             ref_pos: 0,
             ref_base: 0,

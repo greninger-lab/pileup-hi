@@ -8,6 +8,8 @@ use crate::{
     position_queue::{create_region_queue, GenomeInterval, PositionQueue},
 };
 
+const DEFAULT_READ_LEN: usize = 150;
+
 use std::collections::VecDeque;
 use std::thread::JoinHandle;
 
@@ -46,20 +48,20 @@ impl PileupWorker {
         }
     }
 
-    pub fn run(&mut self) {
-        let p = self.params.clone();
-        let i = self.interval.clone();
-        let o = self.output_handle.clone();
-        let s = self.src.clone();
+    // pub fn run(&mut self) {
+    //     let p = self.params.clone();
+    //     let i = self.interval.clone();
+    //     let o = self.output_handle.clone();
+    //     let s = self.src.clone();
 
-        let j = std::thread::spawn(move || {
-            let mut iterator = PileupIterator::new(&s, &p, Some(o)).unwrap();
+    //     let j = std::thread::spawn(move || {
+    //         let mut iterator = PileupIterator::new(&s, &p, Some(o)).unwrap();
 
-            iterator._auto_loop(&PositionQueue { queue: vec![i] }).unwrap();
-        });
+    //         iterator._auto_loop(&PositionQueue { queue: vec![i] }).unwrap();
+    //     });
 
-        self.state = PileupWorkerState::Running(j);
-    }
+    //     self.state = PileupWorkerState::Running(j);
+    // }
 
     pub fn wait(self) -> Result<(), Error> {
         match self.state {
@@ -82,7 +84,7 @@ pub struct PileupEngine {
 impl PileupEngine {
     pub fn initialize(in_params: InputParams, plp_params: PileupParams) -> Result<Self, Error> {
         let src = BamDataSource::from_string(&in_params.file)?;
-        let read_size = BamReader::sample_read_length(&src)?;
+        let read_size = BamReader::sample_read_length(&src).unwrap_or(DEFAULT_READ_LEN);
 
         let tempreader = BamReader::new(&src, 1)?;
         let header = &tempreader.header;

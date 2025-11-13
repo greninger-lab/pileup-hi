@@ -58,17 +58,8 @@ impl BamReader {
         let header = inner.get_header().clone();
         let cur_ref = "UNINIT".to_string();
 
-        Ok(Self {
-            inner,
-            header,
-            cur_ref,
-        })
+        Ok(Self { inner, header, cur_ref })
     }
-
-    // pub fn get_n_tids(src: &BamDataSource) -> Result<u32, Error> {
-    //     let r = Reader::new(src, 1)?;
-    //     Ok(r.get_header().target_count())
-    // }
 
     pub fn read_no_alloc(&mut self, stored_read: &mut Record) -> Option<Result<(), Error>> {
         self.inner.read_no_alloc(stored_read)
@@ -99,10 +90,7 @@ impl BamReader {
         }
 
         if reads_to_sample == READ_LENGTH_SAMPLE_SIZE {
-            anyhow::bail!(
-                "Failed to find any reads to sample for length! Is file {} empty?",
-                src
-            )
+            anyhow::bail!("Failed to find any reads to sample for length! Is file {} empty?", src)
         }
 
         assert!(max_read_len > 0);
@@ -148,8 +136,7 @@ impl BamRead for Reader {
     }
 
     fn read_no_alloc(&mut self, stored_read: &mut Record) -> Option<Result<(), Error>> {
-        self.read(stored_read)
-            .map(|e| e.context("Failed to retrieve read"))
+        self.read(stored_read).map(|e| e.context("Failed to retrieve read"))
     }
 }
 
@@ -181,7 +168,6 @@ impl BamRead for IndexedReader {
     }
 
     fn read_no_alloc(&mut self, stored_read: &mut Record) -> Option<Result<(), Error>> {
-        self.read(stored_read)
-            .map(|e| e.context("Failed to retrieve read"))
+        self.read(stored_read).map(|e| e.context("Failed to retrieve read"))
     }
 }
