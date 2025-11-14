@@ -1,6 +1,7 @@
 #![allow(dead_code, unused_imports)]
 use crate::{
     bamio::{BamDataSource, BamReader},
+    basedepth_string::BaseDepthString,
     output::PileupOutputAggregator,
     params::{InputParams, PileupParams},
     pileup_iterator::PileupIterator,
@@ -115,7 +116,7 @@ impl PileupEngine {
     }
 
     pub fn run_single(&mut self) -> Result<(), Error> {
-        let mut iterator = PileupIterator::new(&self.src, &self.plp_params, None)?;
+        let mut iterator = PileupIterator::new(&self.src, &self.plp_params, PileupString::new())?;
         iterator._auto_loop(&self.intervals)
     }
 

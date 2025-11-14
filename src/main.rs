@@ -7,7 +7,7 @@ use anyhow::Error;
 
 mod alignment;
 mod bamio;
-// mod basedepth_writer;
+mod basedepth_string;
 mod cigar_resolve;
 mod output;
 mod overlap;

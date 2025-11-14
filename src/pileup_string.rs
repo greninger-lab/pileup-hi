@@ -12,6 +12,7 @@ const R_MATCH: u8 = b',';
 
 const F_REFSKIP: u8 = b'>';
 const R_REFSKIP: u8 = b'<';
+
 pub struct PileupString {
     seqbuf: Vec<u8>,
     qualbuf: Vec<u8>,
@@ -19,7 +20,7 @@ pub struct PileupString {
     ref_name: String,
     ref_pos: i64,
     ref_base: u8,
-    pub depth: u64,
+    pub depth: u32,
     lock: std::io::StdoutLock<'static>,
 }
 
@@ -32,6 +33,10 @@ impl OrderedPileupOutput for PileupString {
         self.ref_pos
     }
 
+    fn set_ref_info(&mut self, tid: i32, pos: i64, ref_name: &str, ref_seq: Option<&[u8]>) {
+        self.update(tid, pos, ref_name, ref_seq);
+    }
+
     fn intake(&mut self, p: &PileupAlignment, refseq: Option<&[u8]>) -> Result<(), Error> {
         self.intake(p, refseq)
     }
@@ -39,13 +44,23 @@ impl OrderedPileupOutput for PileupString {
     fn write(&mut self) -> Result<(), Error> {
         self.write()
     }
+
+    fn depth(&self) -> u32 {
+        self.depth
+    }
 }
 
 impl PileupString {
-    pub fn update(&mut self, tid: i32, ref_pos: i64, ref_base: u8, ref_name: &str) {
+    pub fn update(&mut self, tid: i32, ref_pos: i64, ref_name: &str, ref_seq: Option<&[u8]>) {
         self.tid = tid;
         self.ref_pos = ref_pos;
-        self.ref_base = ref_base;
+
+        self.ref_base = if let Some(seq) = ref_seq {
+            *seq.get(ref_pos as usize).unwrap_or(&b'N')
+        } else {
+            b'N'
+        };
+
         if self.ref_name != ref_name {
             self.ref_name = ref_name.to_string();
         }
@@ -112,7 +127,12 @@ pub fn get_qual(qual: u8) -> u8 {
 
 // TODO: take arguments that determine verbosity of reported insertion, e.g. full sequence or just
 // length?
-pub fn expand_insertions(p: &PileupAlignment, seq_buf: &mut Vec<u8>, ndel: &mut i32) -> Result<(), Error> {
+pub fn expand_insertions(
+    p: &PileupAlignment,
+    seq_buf: &mut Vec<u8>,
+    ndel: &mut i32,
+    decorate: bool,
+) -> Result<(), Error> {
     let is_rev = p.rec.is_reverse();
     let mut read_pos: usize;
     let mut read_base: u8;
@@ -132,7 +152,9 @@ pub fn expand_insertions(p: &PileupAlignment, seq_buf: &mut Vec<u8>, ndel: &mut 
         k += 1;
     }
 
-    write!(seq_buf, "+{}", len_indel)?;
+    if decorate {
+        write!(seq_buf, "+{}", len_indel)?
+    };
 
     // then produce the sequence representing the insertion
     k = p.cigar_index + 1;
@@ -214,7 +236,7 @@ pub fn write_plp(
 
     let mut del_len = -p.indel;
     if p.indel > 0 {
-        expand_insertions(p, seq_buf, &mut del_len)?;
+        expand_insertions(p, seq_buf, &mut del_len, true)?;
     }
 
     if del_len > 0 {

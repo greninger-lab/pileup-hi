@@ -8,7 +8,9 @@ pub trait OrderedPileupOutput {
     fn tid(&self) -> i32;
     fn pos(&self) -> i64;
     fn intake(&mut self, p: &PileupAlignment, refseq: Option<&[u8]>) -> Result<(), Error>;
+    fn set_ref_info(&mut self, tid: i32, pos: i64, ref_name: &str, ref_seq: Option<&[u8]>);
     fn write(&mut self) -> Result<(), Error>;
+    fn depth(&self) -> u32;
 }
 
 pub enum PileupOutputState<T: OrderedPileupOutput> {

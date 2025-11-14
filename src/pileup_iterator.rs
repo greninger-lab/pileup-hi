@@ -1,16 +1,14 @@
 use crate::{
     bamio::{BamDataSource, BamReader},
     cigar_resolve::resolve_cigar,
+    output::OrderedPileupOutput,
     params::PileupParams,
-    pileup_string::PileupString,
     position_queue::PositionQueue,
     read_buf::{BufPushResult, ReadBuffer},
     read_filter::ReadFilter,
     refseq::RefSeq,
     utils::read_ends_before_pos,
 };
-
-use crossbeam::channel::Sender;
 
 use anyhow::Error;
 use rust_htslib::bam::Record;
@@ -21,13 +19,13 @@ pub const UNINIT_TID: i32 = i32::MAX - 1;
 /// The iterator responsible for coordinate-wise traversal of a BAM reference/region.
 /// Maintains a buffer of pileups, iterator state (current reference and position), and
 /// auxiliary structs needed for variant detection and output.
-pub struct PileupIterator {
+pub struct PileupIterator<T: OrderedPileupOutput> {
     tid: i32,
     pos: i64,
     next_pos: i64,
     pub max_pos: i64,
     rbuf: ReadBuffer,
-    pileup_writer: PileupString,
+    writer: T,
     pub reader: BamReader,
     refseq: Option<RefSeq>,
     read_filter: ReadFilter,
@@ -42,15 +40,10 @@ pub enum IterResult {
     NoData,
 }
 
-impl PileupIterator {
-    pub fn new(
-        src: &BamDataSource,
-        params: &PileupParams,
-        out_handle: Option<Sender<PileupString>>,
-    ) -> Result<Self, Error> {
+impl<T: OrderedPileupOutput> PileupIterator<T> {
+    pub fn new(src: &BamDataSource, params: &PileupParams, output: T) -> Result<Self, Error> {
         let reader = BamReader::new(src, num_cpus::get())?;
 
-        let pileup_writer = PileupString::new();
         let rbuf = ReadBuffer::new(params.depth, params.disable_overlaps);
 
         let read_filter = ReadFilter::new(
@@ -80,7 +73,7 @@ impl PileupIterator {
             next_pos,
             max_pos,
             rbuf,
-            pileup_writer,
+            writer: output,
             reader,
             read_filter,
             refseq,
@@ -114,12 +107,7 @@ impl PileupIterator {
     pub fn set_pileup(&mut self) -> Result<bool, Error> {
         assert!(self.rbuf.backup_buf.is_empty());
 
-        let (ref_sequence, ref_base) = if let Some(refseq) = &self.refseq {
-            let r = refseq.yield_seq();
-            (Some(r), *r.get(self.pos as usize).unwrap_or(&b'N'))
-        } else {
-            (None, b'N')
-        };
+        let ref_sequence = self.refseq.as_ref().map(|r| r.yield_seq());
 
         // don't bother going through read buffer if it starts beyond the
         // current coordinate
@@ -130,8 +118,8 @@ impl PileupIterator {
         let mut generated = false;
         let mut skip_remainder_of_buf = false;
 
-        self.pileup_writer
-            .update(self.tid, self.pos, ref_base, &self.reader.cur_ref);
+        self.writer
+            .set_ref_info(self.tid, self.pos, &self.reader.cur_ref, ref_sequence);
 
         for raw in self.rbuf.rbuf.drain(..) {
             // from a previous record, we decided to skip all remaining records in this buffer.
@@ -169,14 +157,14 @@ impl PileupIterator {
                 continue;
             }
 
-            self.pileup_writer.intake(&r, ref_sequence)?;
+            self.writer.intake(&r, ref_sequence)?;
 
             drop(r);
             self.rbuf.backup_buf.push(raw);
         }
 
-        if self.pileup_writer.depth > 0 || self.show_all {
-            self.pileup_writer.write()?;
+        if self.writer.depth() > 0 || self.show_all {
+            self.writer.write()?;
         }
 
         self.rbuf.reset();

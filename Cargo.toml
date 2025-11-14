@@ -11,6 +11,8 @@ num_cpus = "1.16.0"
 tikv-jemallocator = "0.5"
 rust-htslib = "0.49.0"
 crossbeam = "0.8.4"
+indexmap = "2.12.0"
+itoa = "1.0.15"
 
 [profile.release]
 # debug = true
