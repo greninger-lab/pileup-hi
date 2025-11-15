@@ -1,19 +1,21 @@
-use clap::Parser;
+use clap::{Parser, Subcommand};
 
-#[derive(Parser, Clone)]
-pub struct Params {
-    #[clap(flatten)]
-    pub inp: InputParams,
-
-    #[clap(flatten)]
-    pub plp: PileupParams,
-
-    #[clap(flatten)]
-    pub outp: OutputParams,
+#[derive(Subcommand, Clone)]
+pub enum Commands {
+    /// Generate a samtools mpileup string
+    Plp(Params),
+    /// Generate a per-coordinate count of bases and indels
+    Histo(Params),
 }
 
-pub fn parse_or_quit() -> Params {
-    match Params::try_parse() {
+#[derive(Parser, Clone)]
+pub struct Args {
+    #[command(subcommand)]
+    pub command: Commands,
+}
+
+pub fn parse_or_quit() -> Args {
+    match Args::try_parse() {
         Ok(p) => {
             // no argument checking at the moment, leaving here for the future.
             p
@@ -23,6 +25,15 @@ pub fn parse_or_quit() -> Params {
             std::process::exit(1)
         }
     }
+}
+
+#[derive(Parser, Clone)]
+pub struct Params {
+    #[clap(flatten)]
+    pub inp: InputParams,
+
+    #[clap(flatten)]
+    pub plp: PileupParams,
 }
 
 #[derive(Parser, Clone)]

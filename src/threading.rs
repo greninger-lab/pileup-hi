@@ -2,7 +2,7 @@
 use crate::{
     bamio::{BamDataSource, BamReader},
     basedepth_string::BaseDepthString,
-    output::PileupOutputAggregator,
+    output::{OrderedPileupOutput, PileupOutputAggregator},
     params::{InputParams, PileupParams},
     pileup_iterator::PileupIterator,
     pileup_string::PileupString,
@@ -73,17 +73,18 @@ impl PileupWorker {
 }
 
 // A very simple driver of multiple concurrent pileup iterators.
-pub struct PileupEngine {
+pub struct PileupEngine<T: OrderedPileupOutput> {
     intervals: PositionQueue,
     read_size: usize,
     in_params: InputParams,
     plp_params: PileupParams,
     workers: Vec<PileupWorker>,
     src: BamDataSource,
+    output: T,
 }
 
-impl PileupEngine {
-    pub fn initialize(in_params: InputParams, plp_params: PileupParams) -> Result<Self, Error> {
+impl<T: OrderedPileupOutput> PileupEngine<T> {
+    pub fn initialize(in_params: InputParams, plp_params: PileupParams, output: T) -> Result<Self, Error> {
         let src = BamDataSource::from_string(&in_params.file)?;
         let read_size = BamReader::sample_read_length(&src).unwrap_or(DEFAULT_READ_LEN);
 
@@ -103,10 +104,11 @@ impl PileupEngine {
             in_params,
             plp_params,
             src,
+            output,
         })
     }
 
-    pub fn run(&mut self) -> Result<(), Error> {
+    pub fn run(self) -> Result<(), Error> {
         self.run_single()
         // if self.intervals.len() > 1 {
         //     self.run_single()
@@ -115,8 +117,8 @@ impl PileupEngine {
         // }
     }
 
-    pub fn run_single(&mut self) -> Result<(), Error> {
-        let mut iterator = PileupIterator::new(&self.src, &self.plp_params, PileupString::new())?;
+    pub fn run_single(self) -> Result<(), Error> {
+        let mut iterator = PileupIterator::new(&self.src, &self.plp_params, self.output)?;
         iterator._auto_loop(&self.intervals)
     }
 

@@ -1,8 +1,13 @@
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
-use crate::params::parse_or_quit;
-use crate::threading::PileupEngine;
+use crate::{
+    basedepth_string::BaseDepthString,
+    params::{parse_or_quit, Commands},
+    pileup_string::PileupString,
+    threading::PileupEngine,
+};
+
 use anyhow::Error;
 
 mod alignment;
@@ -25,8 +30,17 @@ mod utils;
 fn _main() -> Result<(), Error> {
     let params = parse_or_quit();
 
-    let mut engine = PileupEngine::initialize(params.inp, params.plp)?;
-    engine.run()?;
+    match params.command {
+        Commands::Plp(params) => {
+            let engine = PileupEngine::initialize(params.inp, params.plp, PileupString::new())?;
+            engine.run()?
+        }
+
+        Commands::Histo(params) => {
+            let engine = PileupEngine::initialize(params.inp, params.plp, BaseDepthString::new())?;
+            engine.run()?;
+        }
+    };
 
     Ok(())
 }
