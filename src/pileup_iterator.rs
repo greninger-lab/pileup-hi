@@ -152,6 +152,9 @@ impl<T: OrderedPileupOutput + 'static, W: std::io::Write> PileupIterator<T, W> {
         Ok(())
     }
 
+    // pub fn _auto_loop_step(&mut self, queue: &PositionQueue, step: usize) {}
+
+    /// Run the iterator over the entire region without interruption.
     pub fn _auto_loop(&mut self, queue: &PositionQueue) -> Result<(), Error> {
         for reg in &queue.queue {
             self.init_to_region(reg)?;
@@ -162,13 +165,44 @@ impl<T: OrderedPileupOutput + 'static, W: std::io::Write> PileupIterator<T, W> {
                     IterResult::Generated => continue,
                 }
             }
+
+            match &mut self.dest {
+                OutputMethod::WriteDirectly(_) => (),
+                OutputMethod::QueueForOutput(sender, outputs) => {
+                    for o in outputs.drain(..) {
+                        sender.send(o)?;
+                    }
+                }
+            }
         }
 
         Ok(())
     }
 
+    pub fn _auto_loop_yield_batch(mut self, queue: &PositionQueue) -> Result<Vec<T>, Error> {
+        assert_eq!(queue.len(), 1);
+        self.init_to_region(&queue.queue[0])?;
+
+        loop {
+            match self.next()? {
+                IterResult::NoData | IterResult::ReferenceEnd => break,
+                IterResult::Generated => continue,
+            }
+        }
+
+        match &mut self.dest {
+            OutputMethod::WriteDirectly(_) => anyhow::bail!("Cannot output vec of reads when we output them directly"),
+            OutputMethod::QueueForOutput(_sender, outputs) => {
+                let out = std::mem::take(outputs);
+                Ok(out)
+            }
+        }
+    }
+
     /// Generate a pileup from all bases passing the minimum quality filter and covering the
     /// iterator's current reference position.
+    ///
+    /// If allocate is true, allocate a new output type T
     #[inline(always)]
     pub fn set_pileup(&mut self) -> Result<(), Error> {
         assert!(self.rbuf.backup_buf.is_empty());
@@ -195,12 +229,12 @@ impl<T: OrderedPileupOutput + 'static, W: std::io::Write> PileupIterator<T, W> {
                 self.output = Some(output);
             }
 
-            OutputMethod::QueueForOutput(sender) => {
-                let mut output = self.output.as_ref().unwrap().clone();
+            OutputMethod::QueueForOutput(_sender, output_chunk) => {
+                let mut output = T::new();
                 output.set_ref_info(self.tid, self.pos, &self.reader.cur_ref, *ref_sequence);
                 let generated = generate_pileup(rbuf, ref_sequence, &mut output, self.pos, self.min_baseq)?;
                 if generated || output.depth() > 0 || self.show_all {
-                    sender.send(output)?;
+                    output_chunk.push(output);
                 }
             }
         }

@@ -53,6 +53,10 @@ impl OrderedPileupOutput for PileupString {
     fn depth(&self) -> u32 {
         self.depth
     }
+
+    fn new() -> Self {
+        Self::new()
+    }
 }
 
 impl PileupString {

@@ -2,8 +2,9 @@
 use crate::{alignment::PileupAlignment, threading::PileupWorkerState};
 use anyhow::Error;
 use crossbeam::channel::{bounded, Receiver, Sender};
+use std::io::BufWriter;
 
-const PILEUP_OUTPUT_BUF_PURGE_THRES: usize = 10_000;
+const PILEUP_OUTPUT_BUF_PURGE_THRES: usize = 1_000_000;
 
 /// The interface requirements for a pileup output. It needs to give ref information,
 /// intake pileup alignments, update current ref info, display depth, and write itself.
@@ -18,13 +19,14 @@ pub trait OrderedPileupOutput: Send + Sync + Clone {
     fn set_ref_info(&mut self, tid: i32, pos: i64, ref_name: &str, ref_seq: Option<&[u8]>);
     fn write<W: std::io::Write>(&mut self, writer: &mut W) -> Result<(), Error>;
     fn depth(&self) -> u32;
+    fn new() -> Self;
 }
 
 /// Defines how to get output data from iterators from a thread. If using a single thread, we dont'
 /// have to care about queue-ing output.
 pub enum OutputMethod<W: std::io::Write, T: OrderedPileupOutput> {
     WriteDirectly(W),
-    QueueForOutput(Sender<T>),
+    QueueForOutput(Sender<T>, Vec<T>),
 }
 
 ////////////////
@@ -76,27 +78,8 @@ impl<T: OrderedPileupOutput + 'static> PileupOutputAggregator<T> {
     pub fn run(&mut self) {
         let (s, r): (Sender<T>, Receiver<T>) = bounded(10_000_000);
         let j = std::thread::spawn(move || {
-            let mut writer = std::io::stdout().lock();
-            let mut output_queue: Vec<T> = Vec::with_capacity(PILEUP_OUTPUT_BUF_PURGE_THRES);
-
-            while let Ok(out) = r.recv() {
-                output_queue.push(out);
-
-                if output_queue.len() >= PILEUP_OUTPUT_BUF_PURGE_THRES {
-                    // output_queue.sort_by(|a, b| a.tid().cmp(&b.tid()));
-
-                    for mut out in output_queue.drain(..) {
-                        out.write(&mut writer).unwrap();
-                    }
-
-                    // output_queue.shrink_to(0);
-                }
-            }
-
-            // output_queue.sort_by(|a, b| a.tid().cmp(&b.tid()));
-            output_queue
-                .drain(..)
-                .for_each(|mut item| item.write(&mut writer).unwrap())
+            let mut writer = BufWriter::new(std::io::stdout().lock());
+            r.into_iter().for_each(|mut o| o.write(&mut writer).unwrap());
         });
 
         self.worker_state = PileupWorkerState::Running(j);

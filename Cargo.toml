@@ -13,10 +13,11 @@ rust-htslib = "0.49.0"
 crossbeam = "0.8.4"
 indexmap = "2.12.0"
 itoa = "1.0.15"
+rayon = "1.11.0"
 
 [profile.release]
-debug = true
-# debug = false
+# debug = true
+debug = false
 opt-level = 3
 lto = "fat"
 codegen-units = 1

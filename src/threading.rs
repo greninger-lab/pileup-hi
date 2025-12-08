@@ -9,10 +9,13 @@ use crate::{
     position_queue::{create_region_queue, GenomeInterval, PositionQueue},
 };
 
+use rayon::prelude::*;
+use rust_htslib::bam::pileup::Pileup;
+
 const DEFAULT_READ_LEN: usize = 150;
 
-use std::thread::JoinHandle;
 use std::{collections::VecDeque, io::BufWriter};
+use std::{ptr::with_exposed_provenance, thread::JoinHandle};
 
 use anyhow::Error;
 use crossbeam::channel::Sender;
@@ -42,7 +45,7 @@ impl std::io::Write for DummyOutputWriter {
 }
 
 impl PileupWorker {
-    pub fn new(p: &PileupParams, interval: &GenomeInterval, id: usize, src: &BamDataSource) -> Self {
+    pub fn new(p: PileupParams, interval: GenomeInterval, id: usize, src: BamDataSource) -> Self {
         Self {
             interval: interval.clone(),
             id,
@@ -52,27 +55,23 @@ impl PileupWorker {
         }
     }
 
-    pub fn run<T>(&mut self, o: T, queue_handle: Sender<T>)
+    pub fn run<T>(&mut self, o: T, queue_handle: Sender<T>) -> Vec<T>
     where
         T: OrderedPileupOutput + 'static,
     {
-        let p = self.params.clone();
-        let i = self.interval.clone();
-        let s = self.src.clone();
+        let iterator = PileupIterator::new(
+            &self.src,
+            &self.params,
+            o,
+            OutputMethod::<DummyOutputWriter, T>::QueueForOutput(queue_handle, Vec::with_capacity(10_000)),
+        )
+        .unwrap();
 
-        let j = std::thread::spawn(move || {
-            let mut iterator = PileupIterator::new(
-                &s,
-                &p,
-                o,
-                OutputMethod::<DummyOutputWriter, T>::QueueForOutput(queue_handle),
-            )
-            .unwrap();
-
-            iterator._auto_loop(&PositionQueue { queue: vec![i] }).unwrap();
-        });
-
-        self.state = PileupWorkerState::Running(j);
+        iterator
+            ._auto_loop_yield_batch(&PositionQueue {
+                queue: vec![self.interval.clone()],
+            })
+            .unwrap()
     }
 
     pub fn wait(self) -> Result<(), Error> {
@@ -137,35 +136,34 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
         iterator._auto_loop(&self.intervals)
     }
 
-    pub fn run_multi(mut self) -> Result<(), Error> {
+    pub fn run_multi(self) -> Result<(), Error> {
+        let threads = self.plp_params.threads;
+
         for interval in self.intervals.queue {
             let mut agg: PileupOutputAggregator<T> = PileupOutputAggregator::new();
-            // let mut intervals = VecDeque::from(self.intervals.queue);
             agg.run();
             let output_handle = agg.get_output_handle().unwrap();
 
-            let mut subintervals = interval
-                .n_chunks(self.plp_params.threads as i64)
-                .collect::<VecDeque<GenomeInterval>>();
+            let subintervals = interval.chunks(1_000_000).collect::<VecDeque<GenomeInterval>>();
 
             eprintln!("Number of intervals: {}", subintervals.len());
 
-            while !subintervals.is_empty() {
-                for i in 0..self.plp_params.threads {
-                    if let Some(chunk) = subintervals.pop_front() {
-                        self.workers
-                            .push(PileupWorker::new(&self.plp_params, &chunk, i, &self.src));
+            let threadpool = rayon::ThreadPoolBuilder::new().num_threads(threads).build().unwrap();
+            let src = &self.src.clone();
 
-                        let output = self.output.clone();
-                        self.workers[i].run(output, output_handle.clone());
-                    }
-                }
-
-                for worker in self.workers.drain(..) {
-                    worker.wait()?;
-                }
-            }
-
+            // thank you Seth Stadick for this this blazingly-fast rayon usage pattern.
+            threadpool.install(|| {
+                subintervals
+                    .par_iter()
+                    .enumerate()
+                    .flat_map(|(i, chunk)| {
+                        let mut worker = PileupWorker::new(self.plp_params.clone(), chunk.clone(), i, src.clone());
+                        worker.run(self.output.clone(), output_handle.clone())
+                    })
+                    .for_each(|o| {
+                        output_handle.send(o).unwrap();
+                    });
+            });
             drop(output_handle);
             agg.terminate()?;
         }

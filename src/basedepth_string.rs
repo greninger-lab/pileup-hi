@@ -4,7 +4,7 @@ use indexmap::IndexMap;
 use rust_htslib::bam::record::Cigar;
 use std::ops::AddAssign;
 
-const OUTPUT_BUFFER_CAP: usize = 1024 * 1024;
+const OUTPUT_BUFFER_CAP: usize = 1024 * 8;
 
 #[derive(Clone)]
 pub struct BaseDepthString {
@@ -52,6 +52,10 @@ impl OrderedPileupOutput for BaseDepthString {
     #[inline(always)]
     fn depth(&self) -> u32 {
         self.depth
+    }
+
+    fn new() -> Self {
+        Self::new()
     }
 }
 
