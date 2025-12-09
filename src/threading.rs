@@ -56,11 +56,17 @@ pub struct PileupEngine<T: OrderedPileupOutput> {
     intervals: PositionQueue,
     plp_params: PileupParams,
     src: BamDataSource,
+    threads: usize,
     output: T,
 }
 
 impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
-    pub fn initialize(in_params: InputParams, plp_params: PileupParams, output: T) -> Result<Self, Error> {
+    pub fn initialize(
+        in_params: InputParams,
+        plp_params: PileupParams,
+        threads: usize,
+        output: T,
+    ) -> Result<Self, Error> {
         let src = BamDataSource::from_string(&in_params.file)?;
 
         let tempreader = BamReader::new(&src, 1)?;
@@ -76,18 +82,20 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
             intervals,
             plp_params,
             src,
+            threads,
             output,
         })
     }
 
     pub fn run(self) -> Result<(), Error> {
-        if self.intervals.len() == 1 || self.plp_params.threads == 1 || !self.src.has_index()? {
+        if self.intervals.len() == 1 || self.threads == 1 || !self.src.has_index()? {
             self.run_single()
         } else {
             self.run_multi()
         }
     }
 
+    /// Use a single thread for both processing and writing.
     pub fn run_single(self) -> Result<(), Error> {
         let lock = BufWriter::new(std::io::stdout().lock());
         let mut iterator = PileupIterator::new(
@@ -99,9 +107,8 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
         iterator._auto_loop_output_each(&self.intervals)
     }
 
+    /// Use separate threads for processing and writing. Each processing thread owns its own reads into the BAM file, index, and any other files.
     pub fn run_multi(self) -> Result<(), Error> {
-        let threads = self.plp_params.threads;
-
         for interval in self.intervals.queue {
             let mut agg: PileupOutputAggregator<T> = PileupOutputAggregator::new();
             agg.run();
@@ -109,9 +116,10 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
 
             let subintervals = interval.chunks(1_000_000).collect::<VecDeque<GenomeInterval>>();
 
-            eprintln!("Number of intervals: {}", subintervals.len());
-
-            let threadpool = rayon::ThreadPoolBuilder::new().num_threads(threads).build().unwrap();
+            let threadpool = rayon::ThreadPoolBuilder::new()
+                .num_threads(self.threads)
+                .build()
+                .unwrap();
             let src = &self.src.clone();
 
             // thank you Seth Stadick for this this blazingly-fast rayon usage pattern.

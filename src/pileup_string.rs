@@ -55,6 +55,11 @@ impl OrderedPileupOutput for PileupString {
     fn new() -> Self {
         Self::new()
     }
+
+    fn clear(&mut self) {
+        self.seqbuf.clear();
+        self.qualbuf.clear();
+    }
 }
 
 impl PileupString {

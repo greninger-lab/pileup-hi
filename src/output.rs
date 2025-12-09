@@ -20,10 +20,11 @@ pub trait OrderedPileupOutput: Send + Sync + Clone {
     fn set_ref_info(&mut self, tid: i32, pos: i64, ref_name: &str, ref_seq: Option<&[u8]>);
     fn write<W: std::io::Write>(&mut self, writer: &mut W) -> Result<(), Error>;
     fn depth(&self) -> u32;
+    fn clear(&mut self);
     fn new() -> Self;
 }
 
-/// Defines how to get output data from iterators from a thread. If using a single thread, we dont'
+/// Defines how to get output data from iterators from a thread. If using a single thread, we can just print directly and not waste memory queueing output.
 /// have to care about queue-ing output.
 pub enum OutputMethod<W: std::io::Write, T: OrderedPileupOutput> {
     WriteDirectly(W),

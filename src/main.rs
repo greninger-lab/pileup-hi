@@ -27,17 +27,22 @@ mod refseq;
 mod threading;
 mod utils;
 
+const PLP_RECOMMENDED_THREADS: usize = 2;
+const HISTO_RECOMMENDED_THREADS: usize = 4;
+
 fn _main() -> Result<(), Error> {
     let params = parse_or_quit();
 
     match params.command {
         Commands::Plp(params) => {
-            let engine = PileupEngine::initialize(params.inp, params.plp, PileupString::new())?;
+            let threads = params.threads.unwrap_or(PLP_RECOMMENDED_THREADS);
+            let engine = PileupEngine::initialize(params.inp, params.plp, threads, PileupString::new())?;
             engine.run()?
         }
 
         Commands::Histo(params) => {
-            let engine = PileupEngine::initialize(params.inp, params.plp, BaseDepthString::new())?;
+            let threads = params.threads.unwrap_or(HISTO_RECOMMENDED_THREADS);
+            let engine = PileupEngine::initialize(params.inp, params.plp, threads, BaseDepthString::new())?;
             engine.run()?;
         }
     };

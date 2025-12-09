@@ -225,6 +225,8 @@ impl<T: OrderedPileupOutput + 'static, W: std::io::Write> PileupIterator<T, W> {
                 let generated = generate_pileup(rbuf, ref_sequence, &mut output, self.pos, self.min_baseq)?;
                 if generated || output.depth() > 0 || self.show_all {
                     output.write(writer)?;
+                } else {
+                    output.clear();
                 }
                 self.output = Some(output);
             }

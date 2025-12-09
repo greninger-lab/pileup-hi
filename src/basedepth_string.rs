@@ -52,6 +52,12 @@ impl OrderedPileupOutput for BaseDepthString {
         self.depth
     }
 
+    #[inline(always)]
+    fn clear(&mut self) {
+        self.deletions.clear();
+        self.insertions.clear();
+    }
+
     fn new() -> Self {
         Self::new()
     }
