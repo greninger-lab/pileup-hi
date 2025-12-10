@@ -3,7 +3,7 @@ use crate::{
     cigar_resolve::resolve_cigar,
     output::{OrderedPileupOutput, OutputMethod},
     params::PileupParams,
-    position_queue::{GenomeInterval, PositionQueue},
+    position_queue::GenomeInterval,
     read_buf::{BufPushResult, ReadBuffer},
     read_filter::ReadFilter,
     refseq::RefSeq,
@@ -153,12 +153,12 @@ impl<T: OrderedPileupOutput + 'static, W: std::io::Write> PileupIterator<T, W> {
     }
 
     // Output each output T without gathering them all first. Ideal for single-threaded mode or when memory is low.
-    pub fn _auto_loop_output_each(&mut self, queue: &PositionQueue) -> Result<(), Error> {
+    pub fn _auto_loop_output_each(&mut self, queue: &[GenomeInterval]) -> Result<(), Error> {
         if matches!(self.dest, OutputMethod::QueueForOutput(_)) {
             anyhow::bail!("DEV: incompatible funcs; 'Output each' is not compatible with output queue")
         }
 
-        for reg in &queue.queue {
+        for reg in queue {
             self.init_to_region(reg)?;
 
             loop {
@@ -175,13 +175,13 @@ impl<T: OrderedPileupOutput + 'static, W: std::io::Write> PileupIterator<T, W> {
     // gather all output T for a given region into a vec; ideally for delivery to a writer
     // not compatible with OutputMethod::WriteDirectly, since we reuse the same output memory
     // without copying.
-    pub fn _auto_loop_yield_batch(mut self, queue: &PositionQueue) -> Result<Vec<T>, Error> {
+    pub fn _auto_loop_yield_batch(mut self, queue: &[GenomeInterval]) -> Result<Vec<T>, Error> {
         if matches!(self.dest, OutputMethod::WriteDirectly(_)) {
             anyhow::bail!("DEV: incompatible funcs; 'write directly' does not yield Vecs!");
         }
 
         assert_eq!(queue.len(), 1);
-        self.init_to_region(&queue.queue[0])?;
+        self.init_to_region(&queue[0])?;
 
         loop {
             match self.next()? {

@@ -1,5 +1,5 @@
 use anyhow::{Context, Error};
-use rust_htslib::bam::{HeaderView, Read, Reader};
+use rust_htslib::bam::HeaderView;
 
 /// A raw pileup region not yet validated to actually exist in a BAM header.
 pub struct RawPileupRegion {
@@ -137,95 +137,86 @@ fn parse_region_arg(s: &str) -> Result<Vec<RawPileupRegion>, Error> {
     s.split_terminator(' ').map(parse_region_string).collect()
 }
 
-pub fn create_region_queue(argstr: &str, header: &HeaderView) -> Result<PositionQueue, Error> {
+pub fn create_region_queue(argstr: &str, header: &HeaderView) -> Result<Vec<GenomeInterval>, Error> {
     let rawregions = parse_region_arg(argstr)?;
-    PositionQueue::new_from_regions(header, rawregions)
+    intervals_from_regions(header, rawregions)
 }
 
-#[derive(Debug)]
-pub struct PositionQueue {
-    pub queue: Vec<GenomeInterval>,
+/// Create a PositionQueue from the entire header
+pub fn intervals_from_header(header: &HeaderView) -> Result<Vec<GenomeInterval>, Error> {
+    let mut queue = Vec::new();
+
+    for tid in 0..header.target_count() {
+        let end = header.target_len(tid).context("Unable to get target len")?.try_into()?;
+
+        let reg = GenomeInterval {
+            // name: name.to_string(),
+            tid: i64::from(tid),
+            start: 0,
+            end,
+        };
+
+        queue.push(reg);
+    }
+
+    Ok(queue)
 }
 
-impl PositionQueue {
-    /// Create a PositionQueue from the entire header
-    pub fn new(header: &HeaderView) -> Result<Self, Error> {
-        let mut queue = Vec::new();
-
-        for tid in 0..header.target_count() {
-            let end = header.target_len(tid).context("Unable to get target len")?.try_into()?;
-
-            let reg = GenomeInterval {
-                // name: name.to_string(),
-                tid: i64::from(tid),
-                start: 0,
-                end,
-            };
-
-            queue.push(reg);
-        }
-
-        Ok(Self { queue })
+/// Create a position queue from a list of pileup regions, validating to make sure they agree
+/// with the given SAM header.
+pub fn intervals_from_regions(
+    header: &HeaderView,
+    regions: Vec<RawPileupRegion>,
+) -> Result<Vec<GenomeInterval>, Error> {
+    if regions.is_empty() {
+        anyhow::bail!("Cannot supply empty regions list to PositionQueue builder!");
     }
 
-    #[allow(dead_code)]
-    pub fn len(&self) -> usize {
-        self.queue.len()
-    }
+    let tnames: Vec<&str> = header
+        .target_names()
+        .into_iter()
+        .map(|s| std::str::from_utf8(s))
+        .collect::<Result<Vec<&str>, _>>()?;
 
-    /// Create a position queue from a list of pileup regions, validating to make sure they agree
-    /// with the given SAM header.
-    pub fn new_from_regions(header: &HeaderView, regions: Vec<RawPileupRegion>) -> Result<Self, Error> {
-        if regions.is_empty() {
-            anyhow::bail!("Cannot supply empty regions list to PositionQueue builder!");
-        }
+    let mut queue = Vec::new();
 
-        let tnames: Vec<&str> = header
-            .target_names()
-            .into_iter()
-            .map(|s| std::str::from_utf8(s))
-            .collect::<Result<Vec<&str>, _>>()?;
+    for rawreg in regions {
+        let mut found = false;
+        for (tid, canonname) in tnames.iter().enumerate() {
+            if rawreg.name == *canonname {
+                let canonlen = header
+                    .target_len(u32::try_from(tid)?)
+                    .context("Unable to get ref len")?;
 
-        let mut queue = Vec::new();
-
-        for rawreg in regions {
-            let mut found = false;
-            for (tid, canonname) in tnames.iter().enumerate() {
-                if rawreg.name == *canonname {
-                    let canonlen = header
-                        .target_len(u32::try_from(tid)?)
-                        .context("Unable to get ref len")?;
-
-                    if rawreg.end >= i64::try_from(canonlen)? {
-                        anyhow::bail!(
-                            "Supplied region end exceeds length of reference in header: {} vs {}",
-                            rawreg.end,
-                            canonlen
-                        );
-                    }
-
-                    found = true;
-                    queue.push(GenomeInterval {
-                        // name: rawreg.name.clone(),
-                        tid: i64::try_from(tid)?,
-                        start: rawreg.start,
-                        end: rawreg.end,
-                    })
+                if rawreg.end >= i64::try_from(canonlen)? {
+                    anyhow::bail!(
+                        "Supplied region end exceeds length of reference in header: {} vs {}",
+                        rawreg.end,
+                        canonlen
+                    );
                 }
-            }
 
-            if !found {
-                anyhow::bail!("Unable to find reference {} in header!", rawreg.name);
+                found = true;
+                queue.push(GenomeInterval {
+                    // name: rawreg.name.clone(),
+                    tid: i64::try_from(tid)?,
+                    start: rawreg.start,
+                    end: rawreg.end,
+                })
             }
         }
 
-        Ok(Self { queue })
+        if !found {
+            anyhow::bail!("Unable to find reference {} in header!", rawreg.name);
+        }
     }
 
-    #[allow(dead_code)]
-    pub fn new_from_bam(path: &str) -> Result<Self, Error> {
-        let reader = Reader::from_path(path)?;
-        let header = reader.header();
-        Self::new(header)
-    }
+    Ok(queue)
 }
+
+// #[allow(dead_code)]
+// pub fn positino_queue_from_bam(path: &str) -> Result<Self, Error> {
+//     let reader = Reader::from_path(path)?;
+//     let header = reader.header();
+//     Self::new(header)
+// }

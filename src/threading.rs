@@ -3,12 +3,12 @@ use crate::{
     output::{OrderedPileupOutput, OutputMethod, PileupOutputAggregator},
     params::{InputParams, PileupParams},
     pileup_iterator::PileupIterator,
-    position_queue::{create_region_queue, GenomeInterval, PositionQueue},
+    position_queue::{create_region_queue, intervals_from_header, GenomeInterval},
 };
 
 use anyhow::Error;
 use rayon::prelude::*;
-use std::{collections::VecDeque, io::BufWriter};
+use std::io::BufWriter;
 
 pub struct PileupWorker {
     interval: GenomeInterval,
@@ -45,15 +45,13 @@ impl PileupWorker {
         .unwrap();
 
         iterator
-            ._auto_loop_yield_batch(&PositionQueue {
-                queue: vec![self.interval.clone()],
-            })
+            ._auto_loop_yield_batch(std::slice::from_ref(&self.interval))
             .unwrap()
     }
 }
 
 pub struct PileupEngine<T: OrderedPileupOutput> {
-    intervals: PositionQueue,
+    intervals: Vec<GenomeInterval>,
     plp_params: PileupParams,
     src: BamDataSource,
     threads: usize,
@@ -75,7 +73,8 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
         let intervals = if let Some(region) = &in_params.region {
             create_region_queue(region, header)?
         } else {
-            PositionQueue::new(header)?
+            // PositionQueue::new(header)?
+            intervals_from_header(header)?
         };
 
         Ok(Self {
@@ -97,19 +96,23 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
 
     /// Use a single thread for both processing and writing.
     pub fn run_single(self) -> Result<(), Error> {
-        let lock = BufWriter::new(std::io::stdout().lock());
-        let mut iterator = PileupIterator::new(
-            &self.src,
-            &self.plp_params,
-            self.output,
-            OutputMethod::WriteDirectly(lock),
-        )?;
-        iterator._auto_loop_output_each(&self.intervals)
+        for interval in self.intervals {
+            let lock = BufWriter::new(std::io::stdout().lock());
+            let mut iterator = PileupIterator::new(
+                &self.src,
+                &self.plp_params,
+                self.output.clone(),
+                OutputMethod::WriteDirectly(lock),
+            )?;
+
+            iterator._auto_loop_output_each(&[interval])?;
+        }
+        Ok(())
     }
 
     /// Use separate threads for processing and writing. Each processing thread owns its IO readers for input BAM, index, and any other files.
     pub fn run_multi(self) -> Result<(), Error> {
-        for interval in self.intervals.queue {
+        for interval in self.intervals {
             let mut agg: PileupOutputAggregator<T> = PileupOutputAggregator::new();
             agg.run();
             let output_handle = agg.get_output_handle().unwrap();
