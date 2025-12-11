@@ -97,7 +97,7 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
     /// Use a single thread for both processing and writing.
     pub fn run_single(self) -> Result<(), Error> {
         for interval in self.intervals {
-            let lock = BufWriter::new(std::io::stdout().lock());
+            let lock = BufWriter::with_capacity(2 * 1024 * 1024, std::io::stdout().lock());
             let mut iterator = PileupIterator::new(
                 &self.src,
                 &self.plp_params,
@@ -117,6 +117,7 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
             agg.run();
             let output_handle = agg.get_output_handle().unwrap();
 
+            // let subintervals = interval.chunks(1_000_000).collect::<Vec<GenomeInterval>>();
             let subintervals = interval.chunks(1_000_000).collect::<Vec<GenomeInterval>>();
 
             let threadpool = rayon::ThreadPoolBuilder::new()
@@ -137,9 +138,7 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
                         })
                         .collect();
 
-                    for o in results {
-                        output_handle.send(o).unwrap();
-                    }
+                    output_handle.send(results).unwrap();
                 });
             }
 

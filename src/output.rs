@@ -2,7 +2,7 @@
 use crate::alignment::PileupAlignment;
 use anyhow::Error;
 use crossbeam::channel::{bounded, Receiver, Sender};
-use std::io::BufWriter;
+use std::io::{BufWriter, Write};
 use std::thread::JoinHandle;
 
 const PILEUP_OUTPUT_BUF_PURGE_THRES: usize = 1_000_000;
@@ -39,7 +39,7 @@ pub struct PileupOutputAggregator<T>
 where
     T: OrderedPileupOutput,
 {
-    pub input_handle: Option<Sender<T>>,
+    pub input_handle: Option<Sender<Vec<T>>>,
     pub join_handle: Option<JoinHandle<()>>,
 }
 
@@ -51,7 +51,7 @@ impl<T: OrderedPileupOutput + 'static> PileupOutputAggregator<T> {
         }
     }
 
-    pub fn get_output_handle(&self) -> Option<Sender<T>> {
+    pub fn get_output_handle(&self) -> Option<Sender<Vec<T>>> {
         self.input_handle.clone()
     }
 
@@ -67,10 +67,14 @@ impl<T: OrderedPileupOutput + 'static> PileupOutputAggregator<T> {
     }
 
     pub fn run(&mut self) {
-        let (s, r): (Sender<T>, Receiver<T>) = bounded(10_000_000);
+        let (s, r): (Sender<Vec<T>>, Receiver<Vec<T>>) = bounded(10_000_000);
         let j = std::thread::spawn(move || {
-            let mut writer = BufWriter::new(std::io::stdout().lock());
-            r.into_iter().for_each(|mut o| o.write(&mut writer).unwrap());
+            let mut writer = BufWriter::with_capacity(1024 * 1024 * 2, std::io::stdout().lock());
+
+            r.into_iter()
+                .for_each(|o| o.into_iter().for_each(|mut item| item.write(&mut writer).unwrap()));
+
+            writer.flush().unwrap();
         });
 
         self.join_handle = Some(j);
