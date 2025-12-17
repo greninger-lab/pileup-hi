@@ -192,7 +192,7 @@ impl<T: OrderedPileupOutput + 'static, W: std::io::Write> PileupIterator<T, W> {
 
         match &mut self.dest {
             OutputMethod::WriteDirectly(_) => anyhow::bail!("Cannot output vec of reads when we output them directly"),
-            OutputMethod::QueueForOutput(out) => {
+            OutputMethod::QueueForOutput(_) => {
                 // out.yield_data_chunk();
                 Ok(())
             }

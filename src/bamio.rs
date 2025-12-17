@@ -17,6 +17,22 @@ impl BamDataSource {
             Self::Stdin => Ok(false),
         }
     }
+
+    // get everything before extension
+    pub fn fname(&self) -> Result<String, Error> {
+        match self {
+            Self::File(f) => {
+                let full = f.to_str().context("Unable to get file string")?;
+                if let Some((fname, _)) = full.rsplit_once(".") {
+                    Ok(fname.to_string())
+                } else {
+                    Ok(full.to_string())
+                }
+            }
+
+            Self::Stdin => Ok("VIGGO_STDIN".to_string()),
+        }
+    }
 }
 
 impl BamDataSource {
@@ -65,7 +81,11 @@ impl BamReader {
         let header = inner.get_header().clone();
         let cur_ref = "UNINIT".to_string();
 
-        Ok(Self { inner, header, cur_ref })
+        Ok(Self {
+            inner,
+            header,
+            cur_ref,
+        })
     }
 
     pub fn read_no_alloc(&mut self, stored_read: &mut Record) -> Option<Result<(), Error>> {
@@ -116,7 +136,8 @@ impl BamRead for Reader {
     }
 
     fn read_no_alloc(&mut self, stored_read: &mut Record) -> Option<Result<(), Error>> {
-        self.read(stored_read).map(|e| e.context("Failed to retrieve read"))
+        self.read(stored_read)
+            .map(|e| e.context("Failed to retrieve read"))
     }
 }
 
@@ -148,6 +169,7 @@ impl BamRead for IndexedReader {
     }
 
     fn read_no_alloc(&mut self, stored_read: &mut Record) -> Option<Result<(), Error>> {
-        self.read(stored_read).map(|e| e.context("Failed to retrieve read"))
+        self.read(stored_read)
+            .map(|e| e.context("Failed to retrieve read"))
     }
 }

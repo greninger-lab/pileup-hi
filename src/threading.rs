@@ -1,6 +1,9 @@
 use crate::{
     bamio::{BamDataSource, BamReader},
-    output::{OrderedPileupOutput, OutputMethod, PileupOutputAggregator, PileupOutputArray},
+    output::{
+        OrderedPileupOutput, OutputMethod, PileupOutputAggregator, PileupOutputArray,
+        PileupOutputChunk,
+    },
     params::{InputParams, PileupParams},
     pileup_iterator::PileupIterator,
     position_queue::{create_region_queue, intervals_from_header, GenomeInterval},
@@ -32,10 +35,14 @@ impl std::io::Write for DummyOutputWriter {
 
 impl PileupWorker {
     pub fn new(params: PileupParams, interval: GenomeInterval, src: BamDataSource) -> Self {
-        Self { interval, params, src }
+        Self {
+            interval,
+            params,
+            src,
+        }
     }
 
-    pub fn run<T>(&mut self, o: T, snd: Sender<Vec<Option<T>>>)
+    pub fn run<T>(&mut self, o: T, snd: Sender<PileupOutputChunk>, id: u8)
     where
         T: OrderedPileupOutput + 'static,
     {
@@ -44,7 +51,8 @@ impl PileupWorker {
             &self.params,
             o,
             OutputMethod::<DummyOutputWriter, T>::QueueForOutput(
-                PileupOutputArray::new(self.interval.len(), OUTPUT_ARRAY_YIELD_SIZE, snd).unwrap(),
+                PileupOutputArray::new(self.interval.len(), OUTPUT_ARRAY_YIELD_SIZE, snd, id)
+                    .unwrap(),
             ),
         )
         .unwrap();
@@ -118,8 +126,8 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
     /// Use separate threads for processing and writing. Each processing thread owns its IO readers for input BAM, index, and any other files.
     pub fn run_multi(self) -> Result<(), Error> {
         for interval in self.intervals {
-            let mut agg: PileupOutputAggregator<T> = PileupOutputAggregator::new();
-            agg.run();
+            let mut agg: PileupOutputAggregator = PileupOutputAggregator::new();
+            agg.run(self.src.fname().unwrap(), self.threads);
             let output_handle = agg.get_output_handle().unwrap();
 
             let subintervals = interval.chunks(1_000_000).collect::<Vec<GenomeInterval>>();
@@ -131,13 +139,14 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
 
             let src = &self.src.clone();
 
+            // Process ALL subintervals in parallel at once
             threadpool.install(|| {
-                for thread_jobs in subintervals.chunks(self.threads) {
-                    thread_jobs.par_iter().for_each(|chunk| {
-                        let mut worker = PileupWorker::new(self.plp_params.clone(), chunk.clone(), src.clone());
-                        worker.run(self.output.clone(), output_handle.clone());
-                    });
-                }
+                subintervals.par_iter().for_each(|chunk| {
+                    let thread_id = rayon::current_thread_index().unwrap() as u8;
+                    let mut worker =
+                        PileupWorker::new(self.plp_params.clone(), chunk.clone(), src.clone());
+                    worker.run(self.output.clone(), output_handle.clone(), thread_id);
+                });
             });
 
             drop(output_handle);
