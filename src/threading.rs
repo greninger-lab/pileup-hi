@@ -14,6 +14,7 @@ const OUTPUT_ARRAY_YIELD_SIZE: usize = 2000;
 const BUFWRITER_CAP: usize = 2 * 1024 * 1024;
 
 use anyhow::Error;
+use log::{info, warn};
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use std::io::{stdout, BufWriter};
 
@@ -73,7 +74,6 @@ pub struct PileupEngine<T: OrderedPileupOutput> {
     intervals: Vec<GenomeInterval>,
     plp_params: PileupParams,
     src: BamDataSource,
-    threads: usize,
     output: T,
 }
 
@@ -81,7 +81,6 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
     pub fn initialize(
         in_params: InputParams,
         plp_params: PileupParams,
-        threads: usize,
         output: T,
     ) -> Result<Self, Error> {
         let src = BamDataSource::from_string(&in_params.file)?;
@@ -99,15 +98,18 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
             intervals,
             plp_params,
             src,
-            threads,
             output,
         })
     }
 
     pub fn run(self) -> Result<(), Error> {
-        if self.threads == 1 || !self.src.has_index()? {
+        if self.plp_params.threads == 1 {
+            self.run_single()
+        } else if !self.src.has_index()? {
+            warn!("User asked for more than {} threads but file is unindexed. Running in single-thread mode...", self.plp_params.threads);
             self.run_single()
         } else {
+            info!("Running with {} threads...", self.plp_params.threads);
             self.run_multi()
         }
     }
@@ -133,9 +135,9 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
         let outprefix = self.src.fname()?;
 
         for interval in &self.intervals {
-            let mut merge_map = Vec::with_capacity(self.threads);
+            let mut merge_map = Vec::with_capacity(self.plp_params.threads);
             merge_map.push("STDOUT".to_string());
-            for i in 1..self.threads {
+            for i in 1..self.plp_params.threads {
                 merge_map.push(temp_fname(&outprefix, &i.to_string(), "temp.txt"))
             }
 
@@ -144,13 +146,20 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
             *TEMP_FILES.lock().expect("Failed to lock output file mutex") = merge_map.clone();
 
             let per_thread_intervals = interval
-                .n_chunks(self.threads as i64)
+                .n_chunks(self.plp_params.threads as i64)
                 .collect::<Vec<GenomeInterval>>();
 
             let threadpool = rayon::ThreadPoolBuilder::new()
-                .num_threads(self.threads)
+                .num_threads(self.plp_params.threads)
                 .build()
                 .unwrap();
+
+            info!(
+                "Split tid {} into {} chunks for {} threads...",
+                interval.tid,
+                per_thread_intervals.len(),
+                self.plp_params.threads
+            );
 
             let src = &self.src.clone();
 
@@ -168,6 +177,11 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
                         );
                     });
             });
+
+            info!(
+                "Processing for tid {} completed. Deleting intermediate files...",
+                interval.tid
+            );
 
             merge_temp_outputs(
                 &merge_map,

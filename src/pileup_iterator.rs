@@ -244,13 +244,11 @@ impl<T: OrderedPileupOutput + 'static, W: std::io::Write> PileupIterator<T, W> {
 
             OutputMethod::QueueForOutput(output_chunk) => {
                 let output = output_chunk.get_current_mut();
-                // let mut output = T::new();
                 output.set_ref_info(self.tid, self.pos, &self.reader.cur_ref, *ref_sequence);
                 let generated =
                     generate_pileup(rbuf, ref_sequence, output, self.pos, self.min_baseq)?;
                 if generated || output.depth() > 0 || self.show_all {
                     output_chunk.advance();
-                    // output_chunk.push(output);
                 } else {
                     output_chunk.tombstone();
                 }

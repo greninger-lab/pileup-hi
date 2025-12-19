@@ -10,6 +10,7 @@ use crate::{
 };
 
 use anyhow::Error;
+use log::error;
 
 mod alignment;
 mod bamio;
@@ -28,25 +29,20 @@ mod refseq;
 mod threading;
 mod utils;
 
-const PLP_RECOMMENDED_THREADS: usize = 2;
-const HISTO_RECOMMENDED_THREADS: usize = 4;
-
 fn _main() -> Result<(), Error> {
     let params = parse_or_quit();
     setup_exit_handler();
 
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+
     match params.command {
         Commands::Plp(params) => {
-            let threads = params.threads.unwrap_or(PLP_RECOMMENDED_THREADS);
-            let engine =
-                PileupEngine::initialize(params.inp, params.plp, threads, PileupString::new())?;
+            let engine = PileupEngine::initialize(params.inp, params.plp, PileupString::new())?;
             engine.run()?
         }
 
         Commands::Histo(params) => {
-            let threads = params.threads.unwrap_or(HISTO_RECOMMENDED_THREADS);
-            let engine =
-                PileupEngine::initialize(params.inp, params.plp, threads, BaseDepthString::new())?;
+            let engine = PileupEngine::initialize(params.inp, params.plp, BaseDepthString::new())?;
             engine.run()?;
         }
     };
@@ -56,7 +52,7 @@ fn _main() -> Result<(), Error> {
 
 fn main() {
     if let Err(e) = _main() {
-        eprintln!("Error: {}", e);
+        error!("Error: {}", e);
         std::process::exit(1);
     }
 }

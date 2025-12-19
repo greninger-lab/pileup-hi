@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 use crate::alignment::PileupAlignment;
 use anyhow::Error;
+use log::warn;
 use std::fs::File;
 use std::io::{stdout, BufReader, BufWriter, Write};
 use std::sync::Mutex;
@@ -77,7 +78,7 @@ pub fn merge_temp_outputs<W: std::io::Write>(outputs: &[String], mut dest: W) ->
 
 pub fn setup_exit_handler() {
     ctrlc::set_handler(|| {
-        eprintln!("Received termination signal. Cleaning up intermediate files...");
+        warn!("Received termination signal. Cleaning up intermediate files...");
         if let Ok(files) = TEMP_FILES.lock() {
             for fname in files.iter() {
                 if fname == "STDOUT" {
@@ -207,7 +208,6 @@ impl<T: OrderedPileupOutput> PileupOutputArray<T> {
 }
 
 /// Defines how to get output data from iterators from a thread. If using a single thread, we can just print directly and not waste memory queueing output.
-/// have to care about queue-ing output.
 pub enum OutputMethod<W: std::io::Write, T: OrderedPileupOutput> {
     WriteDirectly(W),
     QueueForOutput(PileupOutputArray<T>),

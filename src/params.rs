@@ -1,7 +1,6 @@
 use clap::{Parser, Subcommand};
 
 #[derive(Subcommand, Clone)]
-/// Tuple of command + recommended threads
 pub enum Commands {
     /// Generate a samtools mpileup string
     Plp(Params),
@@ -35,10 +34,6 @@ pub struct Params {
 
     #[clap(flatten)]
     pub plp: PileupParams,
-
-    /// Override for # of processing threads, changing can result in slowdown
-    #[arg(short = 't', long = "threads")]
-    pub threads: Option<usize>,
 }
 
 #[derive(Parser, Clone)]
@@ -55,6 +50,10 @@ pub struct InputParams {
 pub struct PileupParams {
     #[arg(short = 'a')]
     pub show_empty_coords: bool,
+
+    /// Number of threads per reference
+    #[arg(short = 't', long = "threads", default_value_t = 3)]
+    pub threads: usize,
 
     /// Reference fasta to use for comparison, must be indexed
     #[arg(short = 'f', long = "fasta-ref")]
