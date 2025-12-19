@@ -3,6 +3,7 @@ static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 use crate::{
     basedepth_string::BaseDepthString,
+    output::setup_exit_handler,
     params::{parse_or_quit, Commands},
     pileup_string::PileupString,
     threading::PileupEngine,
@@ -32,17 +33,20 @@ const HISTO_RECOMMENDED_THREADS: usize = 4;
 
 fn _main() -> Result<(), Error> {
     let params = parse_or_quit();
+    setup_exit_handler();
 
     match params.command {
         Commands::Plp(params) => {
             let threads = params.threads.unwrap_or(PLP_RECOMMENDED_THREADS);
-            let engine = PileupEngine::initialize(params.inp, params.plp, threads, PileupString::new())?;
+            let engine =
+                PileupEngine::initialize(params.inp, params.plp, threads, PileupString::new())?;
             engine.run()?
         }
 
         Commands::Histo(params) => {
             let threads = params.threads.unwrap_or(HISTO_RECOMMENDED_THREADS);
-            let engine = PileupEngine::initialize(params.inp, params.plp, threads, BaseDepthString::new())?;
+            let engine =
+                PileupEngine::initialize(params.inp, params.plp, threads, BaseDepthString::new())?;
             engine.run()?;
         }
     };

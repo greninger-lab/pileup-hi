@@ -2,6 +2,7 @@ use crate::{
     bamio::{BamDataSource, BamReader},
     output::{
         merge_temp_outputs, OrderedPileupOutput, OutputMethod, PileupOutputArray, TempOutputHandle,
+        TEMP_FILES,
     },
     params::{InputParams, PileupParams},
     pileup_iterator::PileupIterator,
@@ -53,7 +54,7 @@ impl PileupWorker {
             OutputMethod::<DummyOutputWriter, T>::QueueForOutput(
                 PileupOutputArray::new(
                     1_000_000,
-                    std::cmp::min(self.interval.len(), OUTPUT_ARRAY_YIELD_SIZE),
+                    std::cmp::min(self.interval.len() / 10, OUTPUT_ARRAY_YIELD_SIZE),
                     id,
                     out,
                 )
@@ -137,6 +138,10 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
             for i in 1..self.threads {
                 merge_map.push(temp_fname(&outprefix, &i.to_string(), "temp.txt"))
             }
+
+            // we update TEMP_FILES in case the program exits before finishing. This way the files
+            // are marked for deletion during exit handling.
+            *TEMP_FILES.lock().expect("Failed to lock output file mutex") = merge_map.clone();
 
             let per_thread_intervals = interval
                 .n_chunks(self.threads as i64)

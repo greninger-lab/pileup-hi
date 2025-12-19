@@ -3,8 +3,11 @@ use crate::alignment::PileupAlignment;
 use anyhow::Error;
 use std::fs::File;
 use std::io::{stdout, BufReader, BufWriter, Write};
+use std::sync::Mutex;
 
 const PILEUP_OUTPUT_BUF_PURGE_THRES: usize = 1_000_000;
+
+pub static TEMP_FILES: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 /// The interface requirements for a pileup output. It needs to give ref information,
 /// intake pileup alignments, update current ref info, display depth, and write itself.
@@ -70,6 +73,23 @@ pub fn merge_temp_outputs<W: std::io::Write>(outputs: &[String], mut dest: W) ->
     }
     dest.flush()?;
     Ok(())
+}
+
+pub fn setup_exit_handler() {
+    ctrlc::set_handler(|| {
+        eprintln!("Received termination signal. Cleaning up intermediate files...");
+        if let Ok(files) = TEMP_FILES.lock() {
+            for fname in files.iter() {
+                if fname == "STDOUT" {
+                    continue;
+                };
+                let _ = std::fs::remove_file(fname);
+            }
+        }
+
+        std::process::exit(130);
+    })
+    .expect("Failed to set exit handler")
 }
 
 /// A chunked dynamic array used for batching data writes and reducing allocations, intended for
