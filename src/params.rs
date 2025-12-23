@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::{crate_authors, crate_description, crate_version, Parser, Subcommand};
 pub const STDOUT_ARG_STR: &str = "STDOUT";
 
 #[derive(Subcommand, Clone)]
@@ -10,6 +10,13 @@ pub enum Commands {
 }
 
 #[derive(Parser, Clone)]
+#[command(
+    name = "pileup-hi",
+    version = crate_version!(),
+    author = crate_authors!(),
+    about = crate_description!(),
+    help_template = "===== {name} {version} ===== \n{about}\n{author}\n\n{usage-heading} {usage}\n\n{all-args}"
+)]
 pub struct Args {
     #[command(subcommand)]
     pub command: Commands,
@@ -83,7 +90,7 @@ pub struct PileupParams {
     #[arg(long = "rf")]
     pub incl_flags: Vec<String>,
 
-    /// Don't any reads with these flags
+    /// Don't consider any reads with these flags
     #[arg(long = "ff", default_values_t = ["BAM_FSECONDARY".to_string(), "BAM_FQCFAIL".to_string(), "BAM_FDUP".to_string(), "BAM_FUNMAP".to_string()])]
     pub excl_flags: Vec<String>,
 

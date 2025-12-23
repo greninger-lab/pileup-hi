@@ -1,16 +1,21 @@
 [package]
-name = "viggo"
+name = "pileup-hi"
 version = "0.1.0"
 edition = "2021"
+authors = ["Eli Piliper <epiliper@outlook.com>"]
+description = "High-throughput BAM pileup generator"
+
+[[bin]]
+name = "pileuphi"
+path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0.98"
 bio = "2.3.0"
-clap = { version = "4.5.38", features = ["derive"] }
+clap = { version = "4.5.38", features = ["derive", "cargo"] }
 num_cpus = "1.16.0"
 tikv-jemallocator = "0.5"
 rust-htslib = "0.49.0"
-crossbeam = "0.8.4"
 indexmap = "2.12.0"
 itoa = "1.0.15"
 rayon = "1.11.0"
