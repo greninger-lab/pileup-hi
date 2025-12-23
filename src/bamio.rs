@@ -36,7 +36,7 @@ impl BamDataSource {
                 }
             }
 
-            Self::Stdin => Ok("VIGGO_STDIN".to_string()),
+            Self::Stdin => Ok(STDOUT_ARG_STR.to_string()),
         }
     }
 }
