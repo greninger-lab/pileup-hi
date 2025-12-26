@@ -1,5 +1,6 @@
 use crate::{
     bamio::{BamDataSource, BamReader},
+    baq::realign_record,
     cigar_resolve::resolve_cigar,
     output::{OrderedPileupOutput, OutputMethod},
     params::PileupParams,
@@ -88,7 +89,9 @@ pub struct PileupIterator<T: OrderedPileupOutput> {
     read_filter: ReadFilter,
     cur_rec: Record,
     show_all: bool,
+    realign: bool,
     min_baseq: u8,
+    redo_baq: bool,
 }
 
 pub enum IterResult {
@@ -138,6 +141,8 @@ impl<T: OrderedPileupOutput + 'static> PileupIterator<T> {
             cur_rec,
             min_baseq,
             show_all,
+            realign: !params.no_baq,
+            redo_baq: params.redo_baq,
         })
     }
 
@@ -298,7 +303,16 @@ impl<T: OrderedPileupOutput + 'static> PileupIterator<T> {
                 // if we hit depth limit, we exhaust all reads at this position to avoid dealing
                 // with them at self.pos + 1.
                 BufPushResult::MaxDepthMet | BufPushResult::BeforePos => continue,
-                BufPushResult::Pushed => self.next_pos = r.pos(),
+                BufPushResult::Pushed(pushed) => {
+                    self.next_pos = r.pos();
+                    if let Some(refseq) = &mut self.refseq {
+                        if self.realign {
+                            let rec = &mut pushed.borrow_mut().rec;
+                            let flag = if self.redo_baq { 7 } else { 3 };
+                            realign_record(rec, refseq.yield_seq(), refseq.len(), flag)?;
+                        }
+                    }
+                }
             }
 
             if self.next_pos != self.pos && self.next_pos <= self.max_pos {

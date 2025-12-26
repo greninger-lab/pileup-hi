@@ -101,4 +101,12 @@ pub struct PileupParams {
     /// Minimum phred score for a base to be counted
     #[arg(short = 'Q', long = "min-BQ", default_value_t = 13)]
     pub min_baseq: u8,
+
+    /// Disable calcluation of base alignment quality (BAQ)
+    #[arg(short = 'B', long = "no-BAQ", default_value_t = false)]
+    pub no_baq: bool,
+
+    /// Calculate BAQ even when BAQ already exists
+    #[arg(short = 'E', long = "redo-BAQ", default_value_t = false, conflicts_with("no-BAQ"))]
+    pub redo_baq: bool,
 }

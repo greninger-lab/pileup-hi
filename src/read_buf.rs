@@ -12,9 +12,8 @@ pub struct ReadBuffer {
     pub max_depth: usize,
 }
 
-#[derive(Debug, Eq, PartialEq)]
 pub enum BufPushResult {
-    Pushed,
+    Pushed(PileupAlignmentRef),
     DifferentReference,
     Unmapped,
     MaxDepthMet,
@@ -65,10 +64,10 @@ impl ReadBuffer {
             overlap_map.push(Rc::clone(&plp_ref));
         }
 
-        self.rbuf.push(plp_ref);
+        self.rbuf.push(Rc::clone(&plp_ref));
         self.depth += 1;
 
-        BufPushResult::Pushed
+        BufPushResult::Pushed(plp_ref)
     }
 
     pub fn new(depth: usize, disable_overlaps: bool) -> Self {

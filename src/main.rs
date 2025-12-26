@@ -14,6 +14,7 @@ use log::error;
 
 mod alignment;
 mod bamio;
+mod baq;
 mod basedepth_string;
 mod cigar_resolve;
 mod engine;

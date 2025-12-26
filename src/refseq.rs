@@ -100,6 +100,10 @@ impl RefSeq {
         }
     }
 
+    pub fn len(&self) -> i64 {
+        self.wend
+    }
+
     pub fn yield_seq(&self) -> &[u8] {
         match &self.store {
             RefSeqStore::Record(r) => r.seq(),
