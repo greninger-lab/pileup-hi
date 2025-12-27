@@ -1,4 +1,5 @@
 use crate::{
+    alignment::PileupAlignmentRef,
     bamio::{BamDataSource, BamReader},
     baq::realign_record,
     cigar_resolve::resolve_cigar,
@@ -22,6 +23,7 @@ pub fn generate_pileup<T: OrderedPileupOutput>(
     ref_sequence: &Option<&[u8]>,
     out: &mut T,
     pos: i64,
+    tid: i32,
     min_baseq: u8,
 ) -> Result<bool, Error> {
     let mut skip_remainder_of_buf = false;
@@ -38,7 +40,7 @@ pub fn generate_pileup<T: OrderedPileupOutput>(
 
         // record starts beyond position, which means that the remainder of the buffer does
         // too. Skip the rest of the records.
-        if r.rec.pos() > pos {
+        if r.rec.pos() > pos || r.rec.tid() > tid {
             drop(r);
             rbuf.backup_buf.push(raw);
             skip_remainder_of_buf = true;
@@ -47,6 +49,11 @@ pub fn generate_pileup<T: OrderedPileupOutput>(
 
         // record is old and no longer overlaps the query coordinate. Discard.
         if read_ends_before_pos(&r, pos) {
+            rbuf.depth -= 1;
+            continue;
+        }
+
+        if r.rec.tid() < tid {
             rbuf.depth -= 1;
             continue;
         }
@@ -78,6 +85,7 @@ pub fn generate_pileup<T: OrderedPileupOutput>(
 /// auxiliary structs needed for variant detection and output.
 pub struct PileupIterator<T: OrderedPileupOutput> {
     tid: i32,
+    next_tid: i32,
     pos: i64,
     next_pos: i64,
     pub max_pos: i64,
@@ -115,7 +123,7 @@ impl<T: OrderedPileupOutput + 'static> PileupIterator<T> {
 
         let cur_rec = Record::new();
 
-        let tid = UNINIT_TID;
+        let tid @ next_tid = UNINIT_TID;
         let pos @ next_pos @ max_pos = UNINIT_POS;
 
         let show_all = params.show_empty_coords;
@@ -129,6 +137,7 @@ impl<T: OrderedPileupOutput + 'static> PileupIterator<T> {
 
         Ok(Self {
             tid,
+            next_tid,
             pos,
             next_pos,
             max_pos,
@@ -151,59 +160,14 @@ impl<T: OrderedPileupOutput + 'static> PileupIterator<T> {
         self.pos = reg.start;
         self.next_pos = reg.start;
         self.max_pos = reg.end;
-        self.init_to_ref(false)?;
+        self.reader.init_to_ref(self.tid as u32, self.pos, self.max_pos)?;
+
+        if let Some(refseq) = &mut self.refseq {
+            refseq.load_seq(&self.reader.cur_ref)?;
+        }
+        // self.init_to_ref(false)?;
 
         Ok(())
-    }
-
-    // Output each output T without gathering them all first. Ideal for single-threaded mode or when memory is low.
-    pub fn _auto_loop_output_each(&mut self, queue: &[GenomeInterval]) -> Result<(), Error> {
-        if matches!(self.dest, OutputMethod::QueueForOutput(_)) {
-            anyhow::bail!("DEV: incompatible funcs; 'Output each' is not compatible with output queue")
-        }
-
-        for reg in queue {
-            self.init_to_region(reg)?;
-
-            loop {
-                match self.next()? {
-                    IterResult::NoData | IterResult::ReferenceEnd => break,
-                    IterResult::Generated => continue,
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    // gather all output T for a given region into a vec; ideally for delivery to a writer
-    // not compatible with OutputMethod::WriteDirectly, since we reuse the same output memory
-    // without copying.
-    pub fn _auto_loop_yield_batch(mut self, queue: &[GenomeInterval]) -> Result<(), Error> {
-        if matches!(self.dest, OutputMethod::WriteDirectly(_)) {
-            anyhow::bail!("DEV: incompatible funcs; 'write directly' does not yield Vecs!");
-        }
-
-        assert_eq!(queue.len(), 1);
-        self.init_to_region(&queue[0])?;
-
-        loop {
-            match self.next()? {
-                IterResult::NoData | IterResult::ReferenceEnd => break,
-                IterResult::Generated => continue,
-            }
-        }
-
-        match &mut self.dest {
-            OutputMethod::WriteDirectly(_) => {
-                anyhow::bail!("Cannot output vec of reads when we output them directly")
-            }
-            OutputMethod::QueueForOutput(out) => {
-                // out.yield_data_chunk();
-                out.flush();
-                Ok(())
-            }
-        }
     }
 
     /// Generate a pileup from all bases passing the minimum quality filter and covering the
@@ -229,7 +193,7 @@ impl<T: OrderedPileupOutput + 'static> PileupIterator<T> {
             OutputMethod::WriteDirectly(ref mut writer) => {
                 let mut output = self.output.take().unwrap();
                 output.set_ref_info(self.tid, self.pos, &self.reader.cur_ref, *ref_sequence);
-                let generated = generate_pileup(rbuf, ref_sequence, &mut output, self.pos, self.min_baseq)?;
+                let generated = generate_pileup(rbuf, ref_sequence, &mut output, self.pos, self.tid, self.min_baseq)?;
                 if generated || output.depth() > 0 || self.show_all {
                     output.write(writer)?;
                 } else {
@@ -241,7 +205,7 @@ impl<T: OrderedPileupOutput + 'static> PileupIterator<T> {
             OutputMethod::QueueForOutput(output_chunk) => {
                 let output = output_chunk.get_current_mut();
                 output.set_ref_info(self.tid, self.pos, &self.reader.cur_ref, *ref_sequence);
-                let generated = generate_pileup(rbuf, ref_sequence, output, self.pos, self.min_baseq)?;
+                let generated = generate_pileup(rbuf, ref_sequence, output, self.pos, self.tid, self.min_baseq)?;
                 if generated || output.depth() > 0 || self.show_all {
                     output_chunk.advance();
                 } else {
@@ -253,82 +217,125 @@ impl<T: OrderedPileupOutput + 'static> PileupIterator<T> {
         Ok(())
     }
 
-    pub fn init_to_ref(&mut self, inc: bool) -> Result<IterResult, Error> {
-        if self.tid == UNINIT_TID {
-            self.tid = 0;
-        } else if inc {
-            self.tid += 1;
-        }
-
-        self.reader.init_to_ref(self.tid as u32, self.pos, self.max_pos)?;
+    // This is only called when we are iterating over the entire bam and we encounter a read at
+    // another reference.
+    pub fn increment_tid(&mut self) -> Result<(), Error> {
+        self.tid = self.next_tid;
+        self.pos = self.next_pos;
+        self.reader.init_to_ref(self.tid as u32, 0, i64::MAX)?;
 
         if let Some(refseq) = &mut self.refseq {
             refseq.load_seq(&self.reader.cur_ref)?;
-        };
+        }
 
-        self.next_pos = 0;
-
-        Ok(IterResult::Generated)
+        Ok(())
     }
 
-    #[inline(always)]
-    pub fn next(&mut self) -> Result<IterResult, Error> {
-        while self.pos < self.next_pos {
-            self.set_pileup()?;
-            self.pos += 1;
-        }
+    pub fn auto_loop(&mut self, region: &GenomeInterval) -> Result<(), Error> {
+        self.init_to_region(region)?;
 
-        while let Some(read) = self.reader.read_no_alloc(&mut self.cur_rec) {
-            read?;
-            let r = &self.cur_rec;
-
-            if r.is_unmapped() {
-                continue;
-            }
-
-            if !self.read_filter.check_read(r) {
-                continue;
-            }
-
-            if r.pos() > self.max_pos {
-                break;
-            }
-
-            let ret = self.rbuf.attempt_push(r, self.pos, self.tid);
-
-            match ret {
-                BufPushResult::Unmapped => panic!(),
-                BufPushResult::DifferentReference => return Ok(IterResult::ReferenceEnd),
-
-                // if we hit depth limit, we exhaust all reads at this position to avoid dealing
-                // with them at self.pos + 1.
-                BufPushResult::MaxDepthMet | BufPushResult::BeforePos => continue,
-                BufPushResult::Pushed(pushed) => {
-                    self.next_pos = r.pos();
-                    if let Some(refseq) = &mut self.refseq {
-                        if self.realign {
-                            let rec = &mut pushed.borrow_mut().rec;
-                            let flag = if self.redo_baq { 7 } else { 3 };
-                            realign_record(rec, refseq.yield_seq(), refseq.len(), flag)?;
-                        }
+        loop {
+            match self.intake()? {
+                IterResult::Generated => {
+                    while self.pos < self.next_pos {
+                        self.set_pileup()?;
+                        self.pos += 1;
                     }
                 }
-            }
+                IterResult::ReferenceEnd => {
+                    while self.rbuf.depth > 1 {
+                        self.set_pileup()?;
+                        self.pos += 1;
+                    }
 
-            if self.next_pos != self.pos && self.next_pos <= self.max_pos {
-                return Ok(IterResult::Generated);
-            }
-
-            if self.next_pos > self.max_pos {
-                break;
+                    self.increment_tid()?;
+                }
+                IterResult::NoData => break,
             }
         }
 
-        while self.pos < self.max_pos {
+        // process what's left of the buffer after we've hit the end
+        while self.rbuf.depth > 0 {
             self.set_pileup()?;
             self.pos += 1;
         }
 
-        Ok(IterResult::NoData)
+        // if we are storing output in intermediate buffer, flush it.
+        match &mut self.dest {
+            OutputMethod::WriteDirectly(_) => (),
+            OutputMethod::QueueForOutput(out) => out.flush(),
+        }
+
+        Ok(())
+    }
+
+    pub fn realign(&mut self, plp_ref: PileupAlignmentRef) -> Result<i32, Error> {
+        if let Some(refseq) = &mut self.refseq {
+            if self.realign {
+                let rec = &mut plp_ref.borrow_mut().rec;
+                let flag = if self.redo_baq { 7 } else { 3 };
+                realign_record(rec, refseq.yield_seq(), refseq.len(), flag)?;
+            }
+        }
+
+        Ok(0)
+    }
+
+    // load the read buffer until we either 1) run out of data or 2) hit a read at the next
+    // position/tid.
+    pub fn intake(&mut self) -> Result<IterResult, Error> {
+        while self.pos == self.next_pos {
+            // we need to keep reading until we have gathered all reads overlapping a position.
+            //
+            // TODO: move the IO reading logic outside
+            if let Some(read) = self.reader.read_no_alloc(&mut self.cur_rec) {
+                read?;
+                let r = &self.cur_rec;
+
+                if r.is_unmapped() {
+                    continue;
+                }
+
+                if !self.read_filter.check_read(r) {
+                    continue;
+                }
+
+                if r.pos() > self.max_pos {
+                    break;
+                }
+
+                let ret = self.rbuf.attempt_push(r, self.pos, self.tid);
+
+                match ret {
+                    BufPushResult::Unmapped => panic!(),
+
+                    BufPushResult::DifferentReference(pushed) => {
+                        self.next_tid = r.tid();
+                        self.next_pos = r.pos();
+                        self.realign(pushed)?;
+                        return Ok(IterResult::ReferenceEnd);
+                    }
+
+                    BufPushResult::Pushed(pushed) => {
+                        self.next_pos = r.pos();
+                        self.realign(pushed)?;
+                    }
+
+                    // if we've capped our buffer to a given depth, we'll iterate over all
+                    // remaining reads spanning this coordinate before stopping to generate
+                    // pileups. This way we won't have to deal with them at the next position.
+                    BufPushResult::MaxDepthMet | BufPushResult::BeforePos => {
+                        continue;
+                    }
+                }
+            } else {
+                // we ran out of reads.
+                return Ok(IterResult::NoData);
+            }
+        }
+
+        // we're at the same TID as when we started, but we hit a read starting at the next
+        // coordinate.
+        Ok(IterResult::Generated)
     }
 }

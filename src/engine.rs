@@ -34,7 +34,7 @@ impl PileupWorker {
     where
         T: OrderedPileupOutput + 'static,
     {
-        let iterator = PileupIterator::new(
+        let mut iterator = PileupIterator::new(
             &self.src,
             &self.params,
             o,
@@ -50,9 +50,7 @@ impl PileupWorker {
         )
         .unwrap();
 
-        iterator
-            ._auto_loop_yield_batch(std::slice::from_ref(&self.interval))
-            .unwrap()
+        iterator.auto_loop(&self.interval).unwrap()
     }
 }
 
@@ -88,6 +86,10 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
     }
 
     pub fn run(self) -> Result<(), Error> {
+        if self.intervals.is_empty() {
+            return Ok(());
+        }
+
         // remove old output file if it exists.
         if let OutputDataDest::File(ref f) = self.dest {
             if std::fs::exists(f)? {
@@ -112,18 +114,15 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
 
     /// Use a single thread for both processing and writing.
     pub fn run_single(self) -> Result<(), Error> {
-        for interval in self.intervals {
-            let lock = Box::new(BufWriter::with_capacity(2 * 1024 * 1024, std::io::stdout().lock()));
-            let mut iterator = PileupIterator::new(
-                &self.src,
-                &self.plp_params,
-                self.output.clone(),
-                OutputMethod::WriteDirectly(lock),
-            )?;
+        let lock = Box::new(BufWriter::with_capacity(2 * 1024 * 1024, std::io::stdout().lock()));
+        let mut iterator = PileupIterator::new(
+            &self.src,
+            &self.plp_params,
+            self.output.clone(),
+            OutputMethod::WriteDirectly(lock),
+        )?;
 
-            iterator._auto_loop_output_each(&[interval])?;
-        }
-        Ok(())
+        iterator.auto_loop(&self.intervals[0])
     }
 
     /// Use separate threads for processing and writing. Each processing thread owns its IO readers for input BAM, index, and any other files.

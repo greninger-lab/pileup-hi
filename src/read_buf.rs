@@ -14,7 +14,7 @@ pub struct ReadBuffer {
 
 pub enum BufPushResult {
     Pushed(PileupAlignmentRef),
-    DifferentReference,
+    DifferentReference(PileupAlignmentRef),
     Unmapped,
     MaxDepthMet,
     BeforePos,
@@ -23,12 +23,14 @@ pub enum BufPushResult {
 impl ReadBuffer {
     #[inline(always)]
     pub fn attempt_push(&mut self, r: &Record, pos: i64, tid: i32) -> BufPushResult {
+        let mut dif_ref = false;
+
         if r.is_unmapped() {
             return BufPushResult::Unmapped;
         }
 
         if r.tid() != tid {
-            return BufPushResult::DifferentReference;
+            dif_ref = true;
         }
 
         let read_len_from_cigar = cigar2rlen(r);
@@ -37,7 +39,7 @@ impl ReadBuffer {
             self.len = read_len_from_cigar;
         }
 
-        if r.pos() + read_len_from_cigar - 1 < pos {
+        if !dif_ref && r.pos() + read_len_from_cigar - 1 < pos {
             return BufPushResult::BeforePos;
         }
 
@@ -67,7 +69,11 @@ impl ReadBuffer {
         self.rbuf.push(Rc::clone(&plp_ref));
         self.depth += 1;
 
-        BufPushResult::Pushed(plp_ref)
+        if dif_ref {
+            BufPushResult::DifferentReference(plp_ref)
+        } else {
+            BufPushResult::Pushed(plp_ref)
+        }
     }
 
     pub fn new(depth: usize, disable_overlaps: bool) -> Self {
