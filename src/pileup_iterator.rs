@@ -106,7 +106,6 @@ pub struct PileupIterator<T: OrderedPileupOutput> {
 pub enum IterResult {
     ReferenceEnd,
     Generated,
-    NoData,
 }
 
 impl<T: OrderedPileupOutput + 'static> PileupIterator<T> {
@@ -159,6 +158,7 @@ impl<T: OrderedPileupOutput + 'static> PileupIterator<T> {
 
     pub fn init_to_region(&mut self, reg: &GenomeInterval) -> Result<(), Error> {
         self.tid = i32::try_from(reg.tid)?;
+        self.next_tid = self.tid;
         self.pos = reg.start;
         self.next_pos = reg.start;
         self.max_pos = reg.end;
@@ -220,7 +220,15 @@ impl<T: OrderedPileupOutput + 'static> PileupIterator<T> {
 
     // This is only called when we are iterating over the entire bam and we encounter a read at
     // another reference.
-    pub fn increment_tid(&mut self) -> Result<(), Error> {
+    pub fn increment_tid(&mut self) -> Result<bool, Error> {
+        if self.next_tid == self.tid {
+            self.next_tid += 1;
+        }
+
+        if self.next_tid >= self.reader.header.target_count() as i32 {
+            return Ok(false);
+        }
+
         self.tid = self.next_tid;
         self.pos = self.next_pos;
         self.reader.init_to_ref(self.tid as u32, 0, i64::MAX)?;
@@ -229,10 +237,10 @@ impl<T: OrderedPileupOutput + 'static> PileupIterator<T> {
             refseq.load_seq(&self.reader.cur_ref)?;
         }
 
-        Ok(())
+        Ok(true)
     }
 
-    pub fn auto_loop(&mut self, region: &GenomeInterval) -> Result<(), Error> {
+    pub fn auto_loop(&mut self, region: &GenomeInterval, cross_regions: bool) -> Result<(), Error> {
         self.init_to_region(region)?;
 
         loop {
@@ -250,14 +258,19 @@ impl<T: OrderedPileupOutput + 'static> PileupIterator<T> {
 
                 // Reference end is only returned when we haven't fetched. If we aren't fetching,
                 IterResult::ReferenceEnd => {
-                    while self.rbuf.depth > 1 {
+                    while self.pos <= self.max_pos {
                         self.set_pileup()?;
                         self.pos += 1;
                     }
 
-                    self.increment_tid()?;
+                    if !cross_regions {
+                        break;
+                    }
+
+                    if !self.increment_tid()? {
+                        break;
+                    }
                 }
-                IterResult::NoData => break,
             }
         }
 
@@ -340,7 +353,7 @@ impl<T: OrderedPileupOutput + 'static> PileupIterator<T> {
                 }
             } else {
                 // we ran out of reads.
-                return Ok(IterResult::NoData);
+                return Ok(IterResult::ReferenceEnd);
             }
         }
 

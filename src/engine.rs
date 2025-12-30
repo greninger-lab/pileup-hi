@@ -51,7 +51,7 @@ impl PileupWorker {
         )
         .unwrap();
 
-        iterator.auto_loop(&self.interval).unwrap()
+        iterator.auto_loop(&self.interval, false).unwrap()
     }
 }
 
@@ -123,7 +123,7 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
             OutputMethod::WriteDirectly(lock),
         )?;
 
-        iterator.auto_loop(&self.intervals[0])
+        iterator.auto_loop(&self.intervals[0], true)
     }
 
     /// Use separate threads for processing and writing. Each processing thread owns its IO readers for input BAM, index, and any other files.
@@ -159,12 +159,12 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
 
             let per_thread_intervals = interval.n_chunks(n_chunks).collect::<Vec<GenomeInterval>>();
 
-            info!(
-                "Split ref {} into {} chunks for {} threads...",
-                interval.name,
-                per_thread_intervals.len(),
-                self.plp_params.threads
-            );
+            // info!(
+            //     "Split ref {} into {} chunks for {} threads...",
+            //     interval.name,
+            //     per_thread_intervals.len(),
+            //     self.plp_params.threads
+            // );
 
             let src = &self.src.clone();
 
@@ -181,11 +181,11 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
             let main_writer = local_outputs.get_writer(0)?;
             local_outputs.merge(main_writer.writer)?;
 
-            info!(
-                "Tid {} completed in {} seconds...",
-                interval.tid,
-                before.elapsed().as_secs()
-            );
+            // info!(
+            //     "Tid {} completed in {} seconds...",
+            //     interval.tid,
+            //     before.elapsed().as_secs()
+            // );
         }
 
         Ok(())

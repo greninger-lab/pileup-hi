@@ -23,6 +23,9 @@ ctrlc = { version = "3.5.1", features = ["termination"] }
 log = "0.4.29"
 env_logger = "0.11.8"
 
+[profile.dev]
+overflow-checks = false
+
 [profile.release]
 # debug = true
 debug = false

@@ -77,7 +77,7 @@ pub struct PileupParams {
 
     /// Output positions for regions with no depth
     #[arg(long = "aa")]
-    pub show_everything: bool,
+    pub show_empty_regions: bool,
 
     /// Disable R1/R2 mate overlap correction
     #[arg(short = 'x')]
@@ -107,6 +107,6 @@ pub struct PileupParams {
     pub no_baq: bool,
 
     /// Calculate BAQ even when BAQ already exists
-    #[arg(short = 'E', long = "redo-BAQ", default_value_t = false, conflicts_with("no-BAQ"))]
+    #[arg(short = 'E', long = "redo-BAQ", default_value_t = false, conflicts_with("no_baq"))]
     pub redo_baq: bool,
 }
