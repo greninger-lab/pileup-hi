@@ -63,6 +63,10 @@ pub struct PileupParams {
     #[arg(short = 'a')]
     pub show_empty_coords: bool,
 
+    /// Output positions for regions with no depth
+    #[arg(long = "aa")]
+    pub show_empty_regions: bool,
+
     /// Number of threads per reference
     #[arg(short = 't', long = "threads", default_value_t = 3)]
     pub threads: usize,
@@ -74,10 +78,6 @@ pub struct PileupParams {
     /// The maximum number of reads to sample per position. Set to 0 to uncap
     #[arg(short = 'd', long = "depth", default_value_t = 8000)]
     pub depth: usize,
-
-    /// Output positions for regions with no depth
-    #[arg(long = "aa")]
-    pub show_empty_regions: bool,
 
     /// Disable R1/R2 mate overlap correction
     #[arg(short = 'x')]

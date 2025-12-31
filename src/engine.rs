@@ -37,6 +37,7 @@ impl PileupWorker {
     {
         let mut iterator = PileupIterator::new(
             &self.src,
+            &[self.interval.clone()],
             &self.params,
             o,
             OutputMethod::QueueForOutput(
@@ -51,7 +52,7 @@ impl PileupWorker {
         )
         .unwrap();
 
-        iterator.auto_loop(&self.interval, false).unwrap()
+        iterator.auto_loop().unwrap();
     }
 }
 
@@ -118,12 +119,14 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
         let lock = Box::new(BufWriter::with_capacity(2 * 1024 * 1024, std::io::stdout().lock()));
         let mut iterator = PileupIterator::new(
             &self.src,
+            &self.intervals,
             &self.plp_params,
             self.output.clone(),
             OutputMethod::WriteDirectly(lock),
         )?;
 
-        iterator.auto_loop(&self.intervals[0], true)
+        iterator.auto_loop()
+        // iterator.auto_loop(&self.intervals[0], true)
     }
 
     /// Use separate threads for processing and writing. Each processing thread owns its IO readers for input BAM, index, and any other files.
