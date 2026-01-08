@@ -116,7 +116,7 @@ impl<T: OrderedPileupOutput> PileupIterator<T> {
                     skip = true;
                 }
 
-                if head_tid != self.tid {
+                if head_tid > self.tid {
                     skip = true
                 }
             }
@@ -195,7 +195,6 @@ impl<T: OrderedPileupOutput> PileupIterator<T> {
     #[inline(always)]
     pub fn intake(&mut self) -> Result<IterResult, Error> {
         // self.pos = self.pos.min(self.next_pos);
-        // eprintln!("Intake: {} -> {} / {}", self.pos, self.next_pos, self.max_pos);
         // if self.pos > self.max_pos || {
         //     return Ok(IterResult::ReferenceEnd);
         // }
@@ -382,7 +381,8 @@ pub fn generate_pileup<T: OrderedPileupOutput>(
 
         // record starts beyond position, which means that the remainder of the buffer does
         // too. Skip the rest of the records.
-        if r.rec.pos() > pos || r.rec.tid() > tid {
+        if r.rec.tid() > tid || (r.rec.pos() > pos && r.rec.tid() == tid) {
+            // println!("DISCARDING: {} {} | {} {}", r.rec.pos(), r.rec.tid(), pos, tid);
             drop(r);
             rbuf.backup_buf.push(raw);
             skip_remainder_of_buf = true;
@@ -390,12 +390,7 @@ pub fn generate_pileup<T: OrderedPileupOutput>(
         }
 
         // record is old and no longer overlaps the query coordinate. Discard.
-        if read_ends_before_pos(&r, pos) {
-            rbuf.depth -= 1;
-            continue;
-        }
-
-        if r.rec.tid() < tid {
+        if read_ends_before_pos(&r, pos) || r.rec.tid() < tid {
             rbuf.depth -= 1;
             continue;
         }

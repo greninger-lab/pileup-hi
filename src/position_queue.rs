@@ -176,12 +176,13 @@ fn parse_region_string(s: &str) -> Result<RawPileupRegion, Error> {
     }
 }
 
-fn parse_region_arg(s: &str) -> Result<Vec<RawPileupRegion>, Error> {
-    s.split_terminator(' ').map(parse_region_string).collect()
-}
-
 pub fn create_region_queue(argstr: &str, header: &HeaderView) -> Result<Vec<GenomeInterval>, Error> {
-    let rawregions = parse_region_arg(argstr)?;
+    let mut rawregions = vec![];
+
+    for s in argstr.split_terminator(",") {
+        rawregions.push(parse_region_string(s)?);
+    }
+
     intervals_from_regions(header, rawregions)
 }
 

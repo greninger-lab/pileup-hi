@@ -72,8 +72,8 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
         let tempreader = BamReader::new(&src, 1)?;
         let header = &tempreader.header;
 
-        let intervals = if let Some(region) = &in_params.region {
-            create_region_queue(region, header)?
+        let intervals = if let Some(region) = in_params.region {
+            create_region_queue(&region, header)?
         } else {
             intervals_from_header(header)?
         };

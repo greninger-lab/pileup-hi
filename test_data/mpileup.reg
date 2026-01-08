@@ -94,7 +94,7 @@ P 34.out pileuphi plp -t 1 -E -x -f mpileup.ref.fa mpileup-E.bam
 # # CRAM index currently fails
 P 37.out pileuphi plp -t 1 -x -r 17		mpileup.1.$fmt
 P 38.out pileuphi plp -t 1 -x -r 17:4000 	mpileup.1.$fmt
-P 39.out pileuphi plp -t 1 -x -r 17:4,000-4,010 mpileup.1.$fmt
+P 39.out pileuphi plp -t 1 -x -r 17:4000-4010 mpileup.1.$fmt
 # P 40.out pileuphi plp -t 1 -l regions 		ce#5b.$fmt
 # P 41.out pileuphi plp -t 1 -l regions -r CHROMOSOME_V:40-60 ce#5b.$fmt
 # P 42.out pileuphi plp -t 1 -l regions -r CHROMOSOME_I:40-60 ce#5b.$fmt
