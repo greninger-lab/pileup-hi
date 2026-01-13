@@ -1,4 +1,5 @@
 use crate::alignment::{cigar2rlen, CigarState, PileupAlignment, PileupAlignmentRef, CIGAR_STATE_UNINIT};
+use crate::cigar_resolve::resolve_cigar;
 use crate::overlap::{MapOverlaps, OverlapMap};
 use anyhow::Error;
 use log::error;
@@ -24,9 +25,42 @@ pub enum BufPushResult {
 
 impl ReadBuffer {
     #[inline(always)]
-    pub fn attempt_push(&mut self, tid: i32, pos: i64, r: &Record) -> Result<BufPushResult, Error> {
-        let mut dif_ref = false;
+    pub fn store(&mut self, r: &Record, read_len_from_cigar: i64, pos: i64) {
+        let cstate = CigarState {
+            cig: r.cigar(),
+            icig: CIGAR_STATE_UNINIT,
+            iseq: 0,
+            bam_pos: r.pos(),
+            read_len_from_cigar,
+        };
 
+        let mut plp = PileupAlignment::new(r.clone(), cstate);
+
+        // for the love of god, don't remove this.
+        //
+        // if we encounter a read that starts before pos, we need to initialize its cigar state to
+        // catch up to the current position, as resolve_cigar increments in one-cigar-op intervals.
+        //
+        // if we don't, and if the query position is at cigar block 2+, the cigar state will stay
+        // stale.
+        if plp.rec.pos() < pos {
+            for i in plp.rec.pos()..pos {
+                resolve_cigar(&mut plp, i);
+            }
+        }
+
+        let plp_ref = Rc::new(RefCell::new(plp));
+
+        if let Some(overlap_map) = &mut self.overlap_map {
+            overlap_map.push(Rc::clone(&plp_ref));
+        }
+
+        self.rbuf.push(Rc::clone(&plp_ref));
+        self.depth += 1;
+    }
+
+    #[inline(always)]
+    pub fn attempt_push(&mut self, tid: i32, pos: i64, r: &Record) -> Result<BufPushResult, Error> {
         if r.is_unmapped() {
             return Ok(BufPushResult::Unmapped);
         }
@@ -55,51 +89,30 @@ impl ReadBuffer {
             }
         }
 
-        if r.tid() != tid && self.depth > 0 {
-            dif_ref = true;
-        }
-
-        if !dif_ref && r.pos() == pos && self.depth >= self.max_depth {
-            if let Some(ov) = &mut self.overlap_map {
-                ov.delete_read(r);
-            }
-            return Ok(BufPushResult::MaxDepthMet);
-        }
-
         let read_len_from_cigar = cigar2rlen(r);
 
         if read_len_from_cigar > self.len {
             self.len = read_len_from_cigar;
         }
 
-        if !dif_ref && r.pos() + read_len_from_cigar - 1 < pos {
+        if r.tid() != tid {
+            self.store(r, read_len_from_cigar, pos);
+            return Ok(BufPushResult::DifferentReference);
+        }
+
+        if r.pos() == pos && self.depth >= self.max_depth {
+            if let Some(ov) = &mut self.overlap_map {
+                ov.delete_read(r);
+            }
+            return Ok(BufPushResult::MaxDepthMet);
+        }
+
+        if r.pos() + read_len_from_cigar - 1 < pos {
             return Ok(BufPushResult::BeforePos);
         }
 
-        let cstate = CigarState {
-            cig: r.cigar(),
-            icig: CIGAR_STATE_UNINIT,
-            iseq: 0,
-            bam_pos: r.pos(),
-            read_len_from_cigar,
-        };
-
-        let plp = PileupAlignment::new(r.clone(), cstate);
-
-        let plp_ref = Rc::new(RefCell::new(plp));
-
-        if let Some(overlap_map) = &mut self.overlap_map {
-            overlap_map.push(Rc::clone(&plp_ref));
-        }
-
-        self.rbuf.push(Rc::clone(&plp_ref));
-        self.depth += 1;
-
-        if dif_ref {
-            Ok(BufPushResult::DifferentReference)
-        } else {
-            Ok(BufPushResult::Pushed)
-        }
+        self.store(r, read_len_from_cigar, pos);
+        Ok(BufPushResult::Pushed)
     }
 
     pub fn new(depth: usize, disable_overlaps: bool) -> Self {

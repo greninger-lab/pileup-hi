@@ -50,7 +50,7 @@ impl Iterator for GenomeIntervalIterator<'_> {
             return None;
         };
 
-        if self.chunk_size > self.interval.end - self.interval.start + 1 {
+        if self.chunk_size > self.interval.end - self.interval.start {
             self.exhausted = true;
             return Some(self.interval.clone());
         }
@@ -98,12 +98,12 @@ impl GenomeInterval {
         if n_chunks == 1 {
             GenomeIntervalIterator::new(self, i64::MAX)
         } else {
-            GenomeIntervalIterator::new(self, (self.end - self.start + 1) / n_chunks + 1)
+            GenomeIntervalIterator::new(self, (self.end - self.start) / n_chunks + 1)
         }
     }
 
     pub fn len(&self) -> i64 {
-        self.end - self.start + 1
+        self.end - self.start
     }
 }
 
@@ -238,8 +238,8 @@ pub fn intervals_from_regions(
                     .target_len(u32::try_from(tid)?)
                     .context("Unable to get ref len")?;
 
-                let end = if rawreg.end > canonlen as i64 - 1 {
-                    canonlen as i64 - 1
+                let end = if rawreg.end > canonlen as i64 {
+                    canonlen as i64
                 } else {
                     rawreg.end
                 };

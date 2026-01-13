@@ -175,14 +175,14 @@ impl<T: OrderedPileupOutput> PileupIterator<T> {
 
         // end +1 because position-queues are 0-indexed and end fetch boundary is exclusive
         self.reader
-            .init_to_ref(interval.tid as u32, interval.start, interval.end + 1)?;
+            .init_to_ref(interval.tid as u32, interval.start, interval.end)?;
 
         self.tid = interval.tid as i32;
         self.next_tid = self.tid;
 
         self.pos = interval.start;
         self.next_pos = interval.start;
-        self.max_pos = interval.end;
+        self.max_pos = interval.end - 1;
 
         if let Some(refseq) = &mut self.refseq {
             refseq.load_seq(&self.reader.cur_ref)?;
