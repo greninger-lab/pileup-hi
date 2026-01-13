@@ -4,8 +4,10 @@ use crate::{
     alignment::PileupAlignment,
     bamio::OutputDataDest,
     engine::{MIN_BAM_READ_THREADS, MIN_COORDS_PER_THREAD},
-    output::TempOutputHandle,
 };
+
+pub type OutputWriter = BufWriter<Box<dyn std::io::Write>>;
+
 use anyhow::{Context, Error};
 
 pub fn read_ends_before_pos(a: &PileupAlignment, pos: i64) -> bool {
@@ -18,12 +20,7 @@ pub fn temp_fname(prefix: &str, suffix: &str, ext: &str) -> String {
 
 /// Get a writer to a particular destination. Lock specifies whether or not
 /// we expect the writer to be the sole writer the source (pertinent if writing to stdout).
-pub fn get_writer(
-    handle: &OutputDataDest,
-    writer_cap: usize,
-    lock: bool,
-    append: bool,
-) -> Result<TempOutputHandle, Error> {
+pub fn get_writer(handle: &OutputDataDest, writer_cap: usize, lock: bool, append: bool) -> Result<OutputWriter, Error> {
     let dest: Box<dyn std::io::Write> = match handle {
         OutputDataDest::File(p) => {
             let mut o = OpenOptions::new();
@@ -38,9 +35,7 @@ pub fn get_writer(
         }
     };
 
-    Ok(TempOutputHandle {
-        writer: BufWriter::with_capacity(writer_cap, dest),
-    })
+    Ok(BufWriter::with_capacity(writer_cap, dest))
 }
 
 pub fn has_index(bam_file: &str) -> Result<bool, Error> {

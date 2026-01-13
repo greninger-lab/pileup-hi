@@ -149,7 +149,7 @@ impl<T: OrderedPileupOutput> PileupIterator<T> {
             }
 
             OutputMethod::QueueForOutput(output_chunk) => {
-                let output = output_chunk.get_current_mut();
+                let output = output_chunk.cur_mut();
                 output.set_ref_info(self.tid, self.pos, &self.reader.cur_ref, *ref_sequence);
                 let generated = if !skip {
                     generate_pileup(rbuf, ref_sequence, output, self.pos, self.tid, self.min_baseq)?
@@ -158,10 +158,12 @@ impl<T: OrderedPileupOutput> PileupIterator<T> {
                 };
                 if generated || output.depth() > 0 || self.show_empty_coords {
                     self.last_tid_with_cov = self.tid;
-                    output_chunk.advance();
+                    output_chunk.push();
                 } else {
                     output_chunk.tombstone();
                 }
+
+                output_chunk.advance()?;
             }
         }
 
@@ -173,7 +175,6 @@ impl<T: OrderedPileupOutput> PileupIterator<T> {
             anyhow::bail!("Interval has TID exceeding header maximum!");
         }
 
-        // end +1 because position-queues are 0-indexed and end fetch boundary is exclusive
         self.reader
             .init_to_ref(interval.tid as u32, interval.start, interval.end)?;
 
@@ -195,11 +196,6 @@ impl<T: OrderedPileupOutput> PileupIterator<T> {
     // position/tid.
     #[inline(always)]
     pub fn intake(&mut self) -> Result<IterResult, Error> {
-        // self.pos = self.pos.min(self.next_pos);
-        // if self.pos > self.max_pos || {
-        //     return Ok(IterResult::ReferenceEnd);
-        // }
-
         while self.pos == self.next_pos || self.next_pos <= self.pos {
             // we need to keep reading until we have gathered all reads overlapping a position.
             //
@@ -246,7 +242,6 @@ impl<T: OrderedPileupOutput> PileupIterator<T> {
                     BufPushResult::Pushed => {
                         self.next_pos = r.pos();
                     }
-                    // self.next_pos = self.next_pos.max(r.pos())}
 
                     // if we've capped our buffer to a given depth, we'll iterate over all
                     // remaining reads spanning this coordinate before stopping to generate
@@ -347,7 +342,7 @@ impl<T: OrderedPileupOutput> PileupIterator<T> {
         // if we are storing output in intermediate buffer, flush it.
         match &mut self.dest {
             OutputMethod::WriteDirectly(_) => (),
-            OutputMethod::QueueForOutput(out) => out.flush(),
+            OutputMethod::QueueForOutput(out) => out.write_all()?,
         }
 
         Ok(())

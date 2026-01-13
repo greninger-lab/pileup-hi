@@ -1,11 +1,11 @@
 use crate::alignment::PileupAlignment;
 use crate::bamio::OutputDataDest;
 use crate::engine::BUFWRITER_CAP;
-use crate::utils::{get_writer, temp_fname};
+use crate::utils::{get_writer, temp_fname, OutputWriter};
 use anyhow::Error;
 use log::warn;
 use std::fs::File;
-use std::io::{BufReader, BufWriter, Write};
+use std::io::{BufReader, Write};
 use std::sync::Mutex;
 
 pub static FILE_MERGE_SINGLETON: Mutex<OutputFileMerge> = Mutex::new(OutputFileMerge {
@@ -80,7 +80,7 @@ impl OutputFileMerge {
     }
 
     /// If main thread, return the writer to the final output file
-    pub fn get_writer(&self, thread_idx: usize) -> Result<TempOutputHandle, Error> {
+    pub fn get_writer(&self, thread_idx: usize) -> Result<OutputWriter, Error> {
         if thread_idx == 0 {
             get_writer(&self.outfile, BUFWRITER_CAP, true, true)
         } else {
@@ -99,16 +99,6 @@ pub fn generate_subfile_dests(outprefix: &str, n: usize, suffix: &str) -> Vec<Ou
     ret
 }
 
-pub struct TempOutputHandle {
-    pub writer: BufWriter<Box<dyn Write>>,
-}
-
-impl TempOutputHandle {
-    pub fn write(&mut self, data: &[u8]) {
-        let _ = self.writer.write_all(data);
-    }
-}
-
 pub fn setup_exit_handler() {
     ctrlc::set_handler(|| {
         warn!("Received termination signal. Cleaning up intermediate files...");
@@ -123,115 +113,58 @@ pub fn setup_exit_handler() {
     .expect("Failed to set exit handler")
 }
 
-/// A chunked dynamic array used for batching data writes and reducing allocations, intended for
-/// multithreading where a worker thread also owns its writer. Chunks span a range of coordinates,
-/// each of which should be assigned its output or None if the coordinate failed to meet an output
-/// criterion (e.g. depth). Each chunk contains a sub-chunk of size write_batch_size. Once this
-/// chunk is filled, it is written to the output. Once all sub-chunks of a chunk have been written,
-/// a new chunk is allocated.
 pub struct PileupOutputArray<T: OrderedPileupOutput> {
-    data: Vec<Vec<Option<T>>>,
+    data: Vec<T>,
+    writable: Vec<bool>,
+    cur: usize,
     capacity: usize,
-    pub cur_entry: usize,
-    cur_chunk: usize,
-    write_batch_size: usize,
-    output: TempOutputHandle,
-    #[allow(dead_code)]
-    pub id: usize, // keeping this field in case we want to identify logs by thread
-    outbuf: Vec<u8>,
+    writer: OutputWriter,
 }
 
 impl<T: OrderedPileupOutput> PileupOutputArray<T> {
-    pub fn alloc_chunk(&mut self) {
-        let n_chunks = self.capacity / self.write_batch_size;
-        let remainder = self.capacity % self.write_batch_size;
-
-        self.data = Vec::with_capacity(n_chunks);
-
-        for _ in 0..n_chunks - 1 {
-            self.data.push(vec![Some(T::new()); self.write_batch_size]);
-        }
-
-        let final_size = remainder + self.write_batch_size;
-
-        self.data.push(vec![Some(T::new()); final_size]);
-
-        self.cur_entry = 0;
-        self.cur_chunk = 0;
-    }
-
-    pub fn new(capacity: usize, write_batch_size: usize, id: usize, output: TempOutputHandle) -> Result<Self, Error> {
-        let outbuf = Vec::with_capacity(write_batch_size * size_of::<T>());
-        let mut s = Self {
-            data: Vec::new(),
+    pub fn new(capacity: usize, writer: OutputWriter) -> Self {
+        Self {
+            data: vec![T::new(); capacity],
+            writable: vec![true; capacity],
+            cur: 0,
             capacity,
-            cur_entry: 0,
-            cur_chunk: 0,
-            output,
-            write_batch_size,
-            outbuf,
-            id,
-        };
-
-        s.alloc_chunk();
-        Ok(s)
+            writer,
+        }
     }
 
-    pub fn get_current_mut(&mut self) -> &mut T {
-        self.data[self.cur_chunk][self.cur_entry].as_mut().unwrap()
+    pub fn cur_mut(&mut self) -> &mut T {
+        &mut self.data[self.cur]
     }
+
+    // no-op
+    pub fn push(&mut self) {}
 
     pub fn tombstone(&mut self) {
-        self.data[self.cur_chunk][self.cur_entry] = None;
-        self.advance();
+        self.writable[self.cur] = false
     }
 
-    pub fn advance(&mut self) {
-        self.cur_entry += 1;
+    pub fn advance(&mut self) -> Result<(), Error> {
+        self.cur += 1;
 
-        // have enough items to write a batch.
-        if self.cur_entry >= self.data[self.cur_chunk].len() {
-            self.yield_data_chunk();
+        if self.cur >= self.capacity {
+            self.write_all()?;
         }
 
-        // we wrote the last batch of the chunk, so make a new one.
-        if self.cur_chunk >= self.data.len() {
-            self.alloc_chunk();
-        }
+        Ok(())
     }
 
-    pub fn yield_data_chunk(&mut self) {
-        let batch = std::mem::take(&mut self.data[self.cur_chunk]);
-
-        for mut item in batch.into_iter().flatten() {
-            let _ = item.write(&mut self.outbuf);
-        }
-
-        self.output.write(&self.outbuf);
-        self.outbuf.clear();
-
-        self.cur_chunk += 1;
-        self.cur_entry = 0;
-    }
-
-    pub fn flush(&mut self) {
-        let batch = std::mem::take(&mut self.data[self.cur_chunk]);
-
-        for (i, entry) in batch.into_iter().enumerate() {
-            if i >= self.cur_entry {
-                break;
-            }
-
-            if let Some(mut dat) = entry {
-                let _ = dat.write(&mut self.outbuf);
+    pub fn write_all(&mut self) -> Result<(), Error> {
+        for i in 0..self.cur {
+            if self.writable[i] {
+                self.data[i].write(&mut self.writer)?;
+            } else {
+                self.data[i].clear();
             }
         }
 
-        self.output.write(&self.outbuf);
-        self.outbuf.clear();
-
-        self.cur_chunk += 1;
-        self.cur_entry = 0;
+        self.cur = 0;
+        self.writable.fill(true);
+        Ok(())
     }
 }
 

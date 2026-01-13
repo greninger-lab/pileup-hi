@@ -197,7 +197,7 @@ pub fn resolve_cigar(plp: &mut PileupAlignment, pos: i64) {
             plp.qpos = cs.iseq;
         }
 
-        _ => panic!("BULLSHIT"),
+        _ => panic!("CIGAR_RESOLVE bad loop"),
     }
 
     plp.cigar_index = plp.cstate.icig;

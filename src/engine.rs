@@ -2,12 +2,12 @@ use crate::{
     bamio::{BamDataSource, BamReader, OutputDataDest},
     output::{
         generate_subfile_dests, OrderedPileupOutput, OutputFileMerge, OutputMethod, PileupOutputArray,
-        TempOutputHandle, FILE_MERGE_SINGLETON,
+        FILE_MERGE_SINGLETON,
     },
     params::{InputParams, PileupParams},
     pileup_iterator::PileupIterator,
     position_queue::{create_region_queue, intervals_from_header, GenomeInterval},
-    utils::determine_thread_scheme,
+    utils::{determine_thread_scheme, OutputWriter},
 };
 
 use std::time::Instant;
@@ -33,7 +33,7 @@ impl PileupWorker {
         Self { interval, params, src }
     }
 
-    pub fn run<T>(&mut self, o: T, out: TempOutputHandle, id: usize, read_threads: usize)
+    pub fn run<T>(&mut self, o: T, out: OutputWriter, read_threads: usize)
     where
         T: OrderedPileupOutput + 'static,
     {
@@ -42,15 +42,10 @@ impl PileupWorker {
             std::slice::from_ref(&self.interval),
             &self.params,
             o,
-            OutputMethod::QueueForOutput(
-                PileupOutputArray::new(
-                    1_000_000,
-                    std::cmp::min((self.interval.len() / 10).max(1), OUTPUT_ARRAY_YIELD_SIZE) as usize,
-                    id,
-                    out,
-                )
-                .unwrap(),
-            ),
+            OutputMethod::QueueForOutput(PileupOutputArray::new(
+                std::cmp::min((self.interval.len() / 10).max(1), OUTPUT_ARRAY_YIELD_SIZE) as usize,
+                out,
+            )),
             read_threads,
         )
         .unwrap();
@@ -99,7 +94,10 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
         if let OutputDataDest::File(ref f) = self.dest {
             if std::fs::exists(f)? {
                 warn!("Output file {} already exists! Overwriting...", f);
-                std::fs::remove_file(f)?;
+
+                if let Err(e) = std::fs::remove_file(f) {
+                    warn!("Failed to remove file {f}; {e}. Output will be appended...");
+                };
             }
         }
 
@@ -176,12 +174,12 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
                 per_thread_intervals.par_iter().enumerate().for_each(|(i, chunk)| {
                     let mut worker = PileupWorker::new(self.plp_params.clone(), chunk.clone(), src.clone());
                     let writer = local_outputs.get_writer(i).expect("failed to get writer");
-                    worker.run(self.output.clone(), writer, i, thread_scheme.read_threads);
+                    worker.run(self.output.clone(), writer, thread_scheme.read_threads);
                 });
             });
 
             let main_writer = local_outputs.get_writer(0)?;
-            local_outputs.merge(main_writer.writer)?;
+            local_outputs.merge(main_writer)?;
 
             info!(
                 "Tid {} completed in {} seconds...",
