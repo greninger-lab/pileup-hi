@@ -191,8 +191,7 @@ pub fn intervals_from_header(header: &HeaderView) -> Result<Vec<GenomeInterval>,
     let mut queue = Vec::new();
 
     for tid in 0..header.target_count() {
-        let mut end = header.target_len(tid).context("Unable to get target len")?.try_into()?;
-        end -= 1;
+        let end = header.target_len(tid).context("Unable to get target len")?.try_into()?;
 
         let name = header.tid2name(tid);
 
@@ -241,7 +240,7 @@ pub fn intervals_from_regions(
                 let end = if rawreg.end > canonlen as i64 {
                     canonlen as i64
                 } else {
-                    rawreg.end
+                    rawreg.end + 1
                 };
 
                 found = true;
