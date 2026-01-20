@@ -91,27 +91,20 @@ pub struct BamReader {
 
 impl BamReader {
     pub fn new(src: &BamDataSource, threads: usize) -> Result<Self, Error> {
-        let mut _has_index: bool;
+        let _has_index = src.has_index()?;
 
         let inner: Box<dyn BamRead> = match &src {
             BamDataSource::File(file) => match has_index(file.to_str().unwrap())? {
                 true => {
-                    _has_index = true;
                     let mut inner = IndexedReader::new(src, threads)?;
                     inner.fetch(".")?;
                     inner
                 }
 
-                false => {
-                    _has_index = false;
-                    Reader::new(src, threads)?
-                }
+                false => Reader::new(src, threads)?,
             },
 
-            BamDataSource::Stdin => {
-                _has_index = false;
-                Reader::new(src, threads)?
-            }
+            BamDataSource::Stdin => Reader::new(src, threads)?,
         };
 
         let header = inner.get_header().clone();

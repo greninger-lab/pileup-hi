@@ -13,6 +13,27 @@ pub struct ReadBuffer {
     pub overlap_map: Option<OverlapMap>,
     pub depth: usize,
     pub max_depth: usize,
+    pub head: BufferBoundary,
+    pub tail: BufferBoundary,
+}
+
+pub struct BufferBoundary {
+    pub tid: i32,
+    pub pos: i64,
+}
+
+impl BufferBoundary {
+    fn new() -> Self {
+        Self {
+            tid: i32::MIN,
+            pos: i64::MIN,
+        }
+    }
+
+    pub fn set_to_rec(&mut self, r: &Record) {
+        self.tid = r.tid();
+        self.pos = r.pos();
+    }
 }
 
 pub enum BufPushResult {
@@ -43,7 +64,7 @@ impl ReadBuffer {
         //
         // if we don't, and if the query position is at cigar block 2+, the cigar state will stay
         // stale.
-        if plp.rec.pos() < pos {
+        if plp.rec.pos() < pos && plp.rec.tid() == self.tail.tid {
             for i in plp.rec.pos()..pos {
                 resolve_cigar(&mut plp, i);
             }
@@ -53,6 +74,11 @@ impl ReadBuffer {
 
         if let Some(overlap_map) = &mut self.overlap_map {
             overlap_map.push(Rc::clone(&plp_ref));
+        }
+
+        if self.depth == 0 {
+            self.head.set_to_rec(r);
+            self.tail.set_to_rec(r);
         }
 
         self.rbuf.push(Rc::clone(&plp_ref));
@@ -70,27 +96,25 @@ impl ReadBuffer {
         }
 
         // check for unsorted input
-        if let Some((head_tid, head_pos)) = self.tail() {
-            if r.tid() < head_tid {
-                error!(
-                    "File unsorted by reference: tid {} comes after tid {}. Read name: {}",
-                    r.tid(),
-                    head_tid,
-                    std::str::from_utf8(r.qname()).unwrap()
-                );
+        if r.tid() < self.tail.tid {
+            error!(
+                "File unsorted by reference: tid {} comes after tid {}. Read name: {}",
+                r.tid(),
+                self.tail.tid,
+                std::str::from_utf8(r.qname()).unwrap()
+            );
 
-                anyhow::bail!("Unsorted");
-            }
+            anyhow::bail!("Unsorted");
+        }
 
-            if r.pos() < head_pos && head_tid == r.tid() {
-                error!(
-                    "File unsorted by coordinate: pos {} comes after pos {}. Read name: {}",
-                    r.pos(),
-                    head_pos,
-                    std::str::from_utf8(r.qname()).unwrap()
-                );
-                anyhow::bail!("Unsorted");
-            }
+        if r.pos() < self.tail.pos && self.tail.tid == r.tid() {
+            error!(
+                "File unsorted by coordinate: pos {} comes after pos {}. Read name: {}",
+                r.pos(),
+                self.tail.pos,
+                std::str::from_utf8(r.qname()).unwrap()
+            );
+            anyhow::bail!("Unsorted");
         }
 
         let read_len_from_cigar = cigar2rlen(r);
@@ -133,6 +157,9 @@ impl ReadBuffer {
         let max_depth = if depth.cmp(&0).is_eq() { usize::MAX } else { depth };
         let len = 0;
 
+        let head = BufferBoundary::new();
+        let tail = BufferBoundary::new();
+
         let overlap_map = match disable_overlaps {
             false => Some(HashMap::new()),
             true => None,
@@ -145,25 +172,20 @@ impl ReadBuffer {
             len,
             depth: 0,
             max_depth,
+            head,
+            tail,
         }
-    }
-
-    pub fn head(&self) -> Option<(i32, i64)> {
-        self.rbuf.first().map(|p| {
-            let r = &p.borrow().rec;
-            (r.tid(), r.pos())
-        })
-    }
-
-    pub fn tail(&self) -> Option<(i32, i64)> {
-        self.rbuf.last().map(|p| {
-            let r = &p.borrow().rec;
-            (r.tid(), r.pos())
-        })
     }
 
     pub fn reset(&mut self) {
         assert!(self.rbuf.is_empty());
         std::mem::swap(&mut self.rbuf, &mut self.backup_buf);
+        if self.depth > 0 {
+            self.head.set_to_rec(&self.rbuf[0].borrow().rec);
+            self.tail.set_to_rec(&self.rbuf.last().unwrap().borrow().rec);
+        } else {
+            self.head = BufferBoundary::new();
+            self.tail = BufferBoundary::new();
+        }
     }
 }

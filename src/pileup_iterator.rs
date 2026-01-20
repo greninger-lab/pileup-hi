@@ -113,14 +113,12 @@ impl<T: OrderedPileupOutput> PileupIterator<T> {
         // don't bother going through read buffer if it starts beyond the
         // current coordinate
         if !self.show_empty_regions && !self.show_empty_coords {
-            if let Some((head_tid, head_pos)) = self.rbuf.head() {
-                if head_tid == self.tid && head_pos > self.pos {
-                    skip = true;
-                }
+            if self.rbuf.head.tid == self.tid && self.rbuf.head.pos > self.pos {
+                skip = true;
+            }
 
-                if head_tid > self.tid {
-                    skip = true
-                }
+            if self.rbuf.head.tid > self.tid {
+                skip = true
             }
         }
 
@@ -175,6 +173,21 @@ impl<T: OrderedPileupOutput> PileupIterator<T> {
         if interval.tid >= self.reader.header.target_count() as i64 {
             anyhow::bail!("Interval has TID exceeding header maximum!");
         }
+
+        let mut output = self.output.take().unwrap();
+
+        // purge read buffer to remove any reads spanning the old ref to update head and tail.
+        generate_pileup(
+            &mut self.rbuf,
+            &self.refseq.as_ref().and_then(|r| r.yield_seq()),
+            &mut output,
+            i64::MAX,
+            self.tid,
+            self.min_baseq,
+        )?;
+
+        output.clear();
+        self.output = Some(output);
 
         self.reader
             .init_to_ref(interval.tid as u32, interval.start, interval.end)?;
@@ -272,12 +285,15 @@ impl<T: OrderedPileupOutput> PileupIterator<T> {
         self.set_ref(self.intervals[0].clone())?;
 
         loop {
+            // eprintln!(
+            //     "MAIN: {} {} {} {}",
+            //     self.pos, self.next_pos, self.max_pos, self.rbuf.depth
+            // );
             match self.intake()? {
                 IterResult::Generated => {
-                    let (head_tid, head_pos) = self.rbuf.head().unwrap_or((i32::MAX, i64::MAX));
-
-                    if head_pos < self.pos
-                        || (self.show_empty_coords && head_tid == self.tid)
+                    // eprintln!("GENERATED: {} {}", self.rbuf.head.tid, self.rbuf.head.pos);
+                    if self.rbuf.head.pos < self.pos
+                        || (self.show_empty_coords && self.rbuf.head.tid == self.tid)
                         || self.show_empty_regions
                     {
                         while self.pos < self.next_pos {
@@ -285,7 +301,7 @@ impl<T: OrderedPileupOutput> PileupIterator<T> {
                             self.pos += 1;
                         }
                     } else {
-                        self.pos = head_pos;
+                        self.pos = self.rbuf.head.pos;
 
                         while self.pos < self.next_pos {
                             self.set_pileup()?;
@@ -295,15 +311,15 @@ impl<T: OrderedPileupOutput> PileupIterator<T> {
                 }
 
                 IterResult::ReferenceEnd => {
+                    // eprintln!(
+                    //     "REF END: {} {} {}",
+                    //     self.rbuf.head.tid, self.rbuf.head.pos, self.rbuf.depth
+                    // );
                     // if we have reads for current ref still in buffer, process them until they no
                     // longer overlap with cur pos.
-                    while let Some((head_tid, _)) = self.rbuf.head() {
-                        if head_tid == self.tid && self.pos <= self.max_pos {
-                            self.set_pileup()?;
-                            self.pos += 1;
-                        } else {
-                            break; // done with region
-                        }
+                    while self.rbuf.head.tid == self.tid && self.pos <= self.max_pos {
+                        self.set_pileup()?;
+                        self.pos += 1;
                     }
 
                     // if we are showing empty coords and this region has depth ANYWHERE, emit for
