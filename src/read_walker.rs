@@ -60,8 +60,13 @@ impl Iterator for IterCigarMatches {
                     self.cigar_index += 1;
                 }
 
+                Cigar::RefSkip(l) => {
+                    self.genome_pos += l as i64;
+                    self.cigar_index += 1;
+                }
+
                 // TODO: Check cigar-walking logic for refskip and hardclip
-                Cigar::RefSkip(_) | Cigar::Pad(_) | Cigar::HardClip(_) => (),
+                Cigar::Pad(_) | Cigar::HardClip(_) => self.cigar_index += 1,
             }
         }
     }

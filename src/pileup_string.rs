@@ -145,7 +145,7 @@ impl PileupString {
 
 // cap qualitites at max of 126; this also helps avoid non-ascii output
 pub fn get_qual(qual: u8) -> u8 {
-    match qual.cmp(&92).is_gt() {
+    match qual.cmp(&93).is_gt() {
         true => 126,
         false => qual + 33,
     }

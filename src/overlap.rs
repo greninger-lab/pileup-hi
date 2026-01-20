@@ -23,13 +23,17 @@ pub fn hash_qname(r: &Record) -> u64 {
 
 impl MapOverlaps for OverlapMap {
     fn push(&mut self, plp: Rc<RefCell<PileupAlignment>>) {
-        let r = &mut plp.borrow_mut().rec;
+        let mut _r = plp.borrow_mut();
+        let len = _r.cstate.read_len_from_cigar;
+        let r = &mut _r.rec;
 
         if r.is_mate_unmapped() || !r.is_proper_pair() {
             return;
         }
 
-        if r.mtid() >= 0 && (r.mtid() != r.tid()) {
+        if (r.mtid() >= 0 && (r.mtid() != r.tid()))
+            || r.insert_size().abs() >= 2 * (r.seq_len() as i64) && r.mpos() >= r.pos() + len
+        {
             return;
         }
 
@@ -38,10 +42,7 @@ impl MapOverlaps for OverlapMap {
         if let Some(mate) = self.get_mut(&h) {
             tweak_overlap_qual(&mut mate.borrow_mut().rec, r).unwrap();
             self.delete_hash(h);
-            return;
-        }
-
-        if r.mpos() >= r.pos() || (r.is_paired() && r.mpos() == -1) {
+        } else if r.mpos() >= r.pos() || (r.is_paired() && r.mpos() == -1) {
             // criteria passed, insert
             self.insert(h, Rc::clone(&plp));
         }
@@ -216,36 +217,40 @@ pub fn tweak_overlap_qual(a: &mut Record, b: &mut Record) -> Result<(), Error> {
 
         // check for deletion in read A
         // println! {"APOS: {apos} BPOS: {bpos} {} {} {} {}", ap.after_del(), bp.after_del(), ap.genome_pos, bp.genome_pos} // if a_iref > b_iref && ap.passed_deletion() {
-        if a_iref > b_iref && ap.after_del() {
-            while b_iref < a_iref {
-                new_qual = if bmul { (b.qual()[bpos] as f32 * 0.8) as u8 } else { 0 };
+        if a_iref != b_iref {
+            if a_iref > b_iref && ap.after_del() {
+                while b_iref < a_iref {
+                    new_qual = if bmul { (b.qual()[bpos] as f32 * 0.8) as u8 } else { 0 };
 
-                set_qual(b, bpos, new_qual)?;
-                // println! {"Adjusting to deletion in read A: POS: {bpos} QUAL: {new_qual} {}", std::str::from_utf8(a.qname())?}
-                if let Some((n_bpos, n_b_iref)) = bp.next() {
-                    b_iref = n_b_iref;
-                    bpos = n_bpos;
-                } else {
-                    return Ok(());
+                    set_qual(b, bpos, new_qual)?;
+                    // println! {"Adjusting to deletion in read A: POS: {bpos} QUAL: {new_qual} {}", std::str::from_utf8(a.qname())?}
+                    if let Some((n_bpos, n_b_iref)) = bp.next() {
+                        b_iref = n_b_iref;
+                        bpos = n_bpos;
+                    } else {
+                        return Ok(());
+                    }
                 }
+            }
+            // check for deletion in read B
+            // if b_iref > a_iref && bp.passed_deletion() {
+            else if b_iref > a_iref && bp.after_del() {
+                while a_iref < b_iref {
+                    new_qual = if amul { (a.qual()[apos] as f32 * 0.8) as u8 } else { 0 };
+
+                    set_qual(a, apos, new_qual)?;
+                    // println! {"Adjusting to deletion in read B: POS: {apos} QUAL: {new_qual} {}", std::str::from_utf8(a.qname())?}
+                    if let Some((n_apos, n_a_iref)) = ap.next() {
+                        a_iref = n_a_iref;
+                        apos = n_apos;
+                    } else {
+                        return Ok(());
+                    }
+                }
+            } else {
+                continue;
             }
         }
-        // check for deletion in read B
-        // if b_iref > a_iref && bp.passed_deletion() {
-        else if b_iref > a_iref && bp.after_del() {
-            while a_iref < b_iref {
-                new_qual = if amul { (a.qual()[apos] as f32 * 0.8) as u8 } else { 0 };
-
-                set_qual(a, apos, new_qual)?;
-                // println! {"Adjusting to deletion in read B: POS: {apos} QUAL: {new_qual} {}", std::str::from_utf8(a.qname())?}
-                if let Some((n_apos, n_a_iref)) = ap.next() {
-                    a_iref = n_a_iref;
-                    apos = n_apos;
-                } else {
-                    return Ok(());
-                }
-            }
-        };
 
         null_ref_bases(a, apos, b, bpos, amul, &mut base_a, &mut base_b, &mut new_qual)?;
     }

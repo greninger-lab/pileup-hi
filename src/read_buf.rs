@@ -62,6 +62,10 @@ impl ReadBuffer {
     #[inline(always)]
     pub fn attempt_push(&mut self, tid: i32, pos: i64, r: &Record) -> Result<BufPushResult, Error> {
         if r.is_unmapped() {
+            if let Some(ref mut ov) = self.overlap_map {
+                ov.delete_read(r);
+            }
+
             return Ok(BufPushResult::Unmapped);
         }
 
@@ -93,6 +97,13 @@ impl ReadBuffer {
 
         if read_len_from_cigar > self.len {
             self.len = read_len_from_cigar;
+        }
+
+        if r.is_mate_unmapped() {
+            if let Some(ref mut ov) = self.overlap_map {
+                ov.delete_read(r);
+            }
+            return Ok(BufPushResult::BeforePos);
         }
 
         if r.tid() != tid {

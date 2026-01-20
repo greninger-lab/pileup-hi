@@ -99,6 +99,10 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
             }
         }
 
+        if self.src.has_index()? {
+            info!("Found index for for input file {}", self.src.fname()?);
+        }
+
         if self.plp_params.threads == 1 {
             self.run_single()
         } else if !self.src.has_index()? {

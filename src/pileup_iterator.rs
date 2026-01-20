@@ -4,6 +4,7 @@ use crate::{
     cigar_resolve::resolve_cigar,
     engine::MIN_BAM_READ_THREADS,
     output::{OrderedPileupOutput, OutputMethod},
+    overlap::MapOverlaps,
     params::PileupParams,
     position_queue::GenomeInterval,
     read_buf::{BufPushResult, ReadBuffer},
@@ -196,7 +197,11 @@ impl<T: OrderedPileupOutput> PileupIterator<T> {
     // position/tid.
     #[inline(always)]
     pub fn intake(&mut self) -> Result<IterResult, Error> {
-        while self.pos == self.next_pos || self.next_pos <= self.pos {
+        if self.reader.eof {
+            return Ok(IterResult::ReferenceEnd);
+        }
+
+        loop {
             // we need to keep reading until we have gathered all reads overlapping a position.
             //
             // TODO: move the IO reading logic outside
@@ -241,6 +246,10 @@ impl<T: OrderedPileupOutput> PileupIterator<T> {
 
                     BufPushResult::Pushed => {
                         self.next_pos = r.pos();
+
+                        if self.next_pos > self.pos {
+                            return Ok(IterResult::Generated);
+                        }
                     }
 
                     // if we've capped our buffer to a given depth, we'll iterate over all
@@ -252,13 +261,10 @@ impl<T: OrderedPileupOutput> PileupIterator<T> {
                 }
             } else {
                 // we ran out of reads.
+                self.reader.eof = true;
                 return Ok(IterResult::ReferenceEnd);
             }
         }
-
-        // we're at the same TID as when we started, but we hit a read starting at the next
-        // coordinate.
-        Ok(IterResult::Generated)
     }
 
     pub fn auto_loop(&mut self) -> Result<(), Error> {
@@ -268,10 +274,23 @@ impl<T: OrderedPileupOutput> PileupIterator<T> {
         loop {
             match self.intake()? {
                 IterResult::Generated => {
-                    // eprintln!("Generated {} -> {} / {}", self.pos, self.next_pos, self.max_pos);
-                    while self.pos < self.next_pos {
-                        self.set_pileup()?;
-                        self.pos += 1;
+                    let (head_tid, head_pos) = self.rbuf.head().unwrap_or((i32::MAX, i64::MAX));
+
+                    if head_pos < self.pos
+                        || (self.show_empty_coords && head_tid == self.tid)
+                        || self.show_empty_regions
+                    {
+                        while self.pos < self.next_pos {
+                            self.set_pileup()?;
+                            self.pos += 1;
+                        }
+                    } else {
+                        self.pos = head_pos;
+
+                        while self.pos < self.next_pos {
+                            self.set_pileup()?;
+                            self.pos += 1
+                        }
                     }
                 }
 
@@ -388,6 +407,9 @@ pub fn generate_pileup<T: OrderedPileupOutput>(
         // record is old and no longer overlaps the query coordinate. Discard.
         if read_ends_before_pos(&r, pos) || r.rec.tid() < tid {
             rbuf.depth -= 1;
+            if let Some(ref mut overlap) = rbuf.overlap_map {
+                overlap.delete_read(&r.rec);
+            }
             continue;
         }
 

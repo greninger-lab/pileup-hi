@@ -83,39 +83,68 @@ impl std::fmt::Display for OutputDataDest {
 
 pub struct BamReader {
     inner: Box<dyn BamRead>,
+    has_index: bool,
     pub header: HeaderView,
     pub cur_ref: String,
+    pub eof: bool,
 }
 
 impl BamReader {
     pub fn new(src: &BamDataSource, threads: usize) -> Result<Self, Error> {
+        let mut _has_index: bool;
+
         let inner: Box<dyn BamRead> = match &src {
             BamDataSource::File(file) => match has_index(file.to_str().unwrap())? {
                 true => {
+                    _has_index = true;
                     let mut inner = IndexedReader::new(src, threads)?;
                     inner.fetch(".")?;
                     inner
                 }
 
-                false => Reader::new(src, threads)?,
+                false => {
+                    _has_index = false;
+                    Reader::new(src, threads)?
+                }
             },
 
-            BamDataSource::Stdin => Reader::new(src, threads)?,
+            BamDataSource::Stdin => {
+                _has_index = false;
+                Reader::new(src, threads)?
+            }
         };
 
         let header = inner.get_header().clone();
         let cur_ref = "UNINIT".to_string();
 
-        Ok(Self { inner, header, cur_ref })
+        Ok(Self {
+            inner,
+            header,
+            cur_ref,
+            eof: false,
+            has_index: _has_index,
+        })
     }
 
     pub fn read_no_alloc(&mut self, stored_read: &mut Record) -> Option<Result<(), Error>> {
+        // if we call read_no_alloc() on an unindexed reader after it already returned None (eof),
+        // it will infinitely hang, at least with the version of rust-htslib I'm using.
+        if self.eof {
+            return None;
+        }
+
         self.inner.read_no_alloc(stored_read)
     }
 
     pub fn init_to_ref(&mut self, tid: u32, start: i64, end: i64) -> Result<(), Error> {
         self.cur_ref = std::str::from_utf8(self.header.tid2name(tid))?.to_string();
-        self.inner.init_to_ref(tid, start, end)
+        self.inner.init_to_ref(tid, start, end)?;
+
+        if self.eof && self.has_index {
+            self.eof = false;
+        }
+
+        Ok(())
     }
 }
 
