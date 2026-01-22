@@ -47,9 +47,19 @@ impl OutputFileMerge {
             match s {
                 OutputDataDest::Stdout => anyhow::bail!("cannot merge from stdout! Critical error"),
                 OutputDataDest::File(ref f) => {
-                    let fhandle = File::open(f)?;
-                    let mut reader = BufReader::with_capacity(2 * 1024 * 1024, fhandle);
-                    std::io::copy(&mut reader, &mut dest)?;
+                    match File::open(f) {
+                        Err(e) => {
+                            match e.kind() {
+                                std::io::ErrorKind::NotFound => (),
+                                _ => anyhow::bail!("Failed to open output file for merging: {}", e),
+                            };
+                        }
+
+                        Ok(f) => {
+                            let mut reader = BufReader::with_capacity(2 * 1024 * 1024, f);
+                            std::io::copy(&mut reader, &mut dest)?;
+                        }
+                    }
                     if let Err(e) = std::fs::remove_file(f) {
                         match e.kind() {
                             std::io::ErrorKind::NotFound => (),

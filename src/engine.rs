@@ -16,6 +16,11 @@ const OUTPUT_ARRAY_YIELD_SIZE: i64 = 2000;
 pub const BUFWRITER_CAP: usize = 2 * 1024 * 1024;
 pub const MIN_BAM_READ_THREADS: usize = 2;
 
+/// The default minimum number of coordinates to give each thread for processing.
+/// This basically exists to prevent doing unnecessary work for very small regions.
+/// Can be overridden if you need more horsepower for, say, high-depth regions.
+pub const MIN_COORDS_PER_THREAD: i64 = 250_000;
+
 use anyhow::Error;
 use log::{info, warn};
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
@@ -154,9 +159,17 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
             let local_outputs = output_merge_lock.clone();
             drop(output_merge_lock);
 
-            let per_thread_intervals = interval
-                .n_chunks(self.plp_params.threads as i64)
+            let per_thread_intervals =
+                if self.plp_params.threads as i64 * self.plp_params.coords_per_thread > interval.len() {
+                    interval.chunks(self.plp_params.coords_per_thread)
+                } else {
+                    interval.n_chunks(self.plp_params.threads as i64)
+                }
                 .collect::<Vec<GenomeInterval>>();
+
+            //let per_thread_intervals = interval
+            //    .n_chunks(self.plp_params.threads as i64)
+            //    .collect::<Vec<GenomeInterval>>();
 
             info!(
                 "Split ref {} into {} chunks...",

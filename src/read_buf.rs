@@ -135,7 +135,7 @@ impl ReadBuffer {
             return Ok(BufPushResult::DifferentReference);
         }
 
-        if r.pos() == pos && self.depth >= self.max_depth {
+        if r.pos() <= pos && self.depth >= self.max_depth {
             if let Some(ov) = &mut self.overlap_map {
                 ov.delete_read(r);
             }

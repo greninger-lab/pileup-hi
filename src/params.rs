@@ -1,5 +1,6 @@
 use clap::{crate_authors, crate_description, crate_version, Parser, Subcommand};
 pub const STDOUT_ARG_STR: &str = "STDOUT";
+use crate::engine::MIN_COORDS_PER_THREAD;
 
 #[derive(Subcommand, Clone)]
 pub enum Commands {
@@ -70,6 +71,9 @@ pub struct PileupParams {
     /// Number of threads per reference
     #[arg(short = 't', long = "threads", default_value_t = 3)]
     pub threads: usize,
+
+    #[arg(short = 'c', long = "thread-coords", default_value_t = MIN_COORDS_PER_THREAD)]
+    pub coords_per_thread: i64,
 
     /// Reference fasta to use for comparison, must be indexed
     #[arg(short = 'f', long = "fasta-ref")]
