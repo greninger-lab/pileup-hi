@@ -1,0 +1,1 @@
+All code except `src/overlap_wrapper.c` is licensed under GPL 3.0. `src/overlap_wrapper.c` is licensed under the MIT/expat license because it is taken from htslib.
