@@ -1,7 +1,10 @@
 fn main() {
     cc::Build::new()
         .file("src/overlap_wrapper.c")
-        .include("htslib") // Just use "htslib" - the linker will find it
+        .includes(
+            pkg_config::Config::new().probe("htslib")
+            .expect("failed to find htslib installation on this system").include_paths
+            )
         .opt_level(3)
         .flag_if_supported("-march=native")
         .compile("overlap_wrapper");

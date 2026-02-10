@@ -1123,7 +1123,7 @@ dependencies = [
 
 [[package]]
 name = "pileup-hi"
-version = "0.1.0"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "bio",
@@ -1131,10 +1131,12 @@ dependencies = [
  "clap",
  "ctrlc",
  "env_logger",
+ "fxhash",
  "indexmap",
  "itoa",
  "log",
  "num_cpus",
+ "pkg-config",
  "rayon",
  "rust-htslib",
  "tikv-jemallocator",

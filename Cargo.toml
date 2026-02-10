@@ -1,6 +1,6 @@
 [package]
 name = "pileup-hi"
-version = "0.1.0"
+version = "0.9.0"
 edition = "2021"
 authors = ["Eli Piliper <epiliper@outlook.com>"]
 description = "High-throughput BAM pileup generator"
@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [build-dependencies]
 cc = "1.0"
+pkg-config = "0.3.32"
 
 [dependencies]
 anyhow = "1.0.98"
@@ -25,6 +26,7 @@ rayon = "1.11.0"
 ctrlc = { version = "3.5.1", features = ["termination"] }
 log = "0.4.29"
 env_logger = "0.11.8"
+fxhash = "0.2.1"
 
 [profile.dev]
 overflow-checks = false
