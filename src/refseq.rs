@@ -7,67 +7,67 @@ use log::warn;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
+use std::sync::Arc;
 
-pub struct FastaIndexedReader {
+struct FastaIndexedReader {
     inner: fasta::IndexedReader<File>,
-    data: Vec<u8>,
 }
 
-pub struct FastaReader {
+struct FastaReader {
     inner: fasta::Reader<BufReader<File>>,
-    data: Record,
+}
+
+struct NoReader {}
+
+impl NoReader {
+    fn new() -> Self {
+        Self {}
+    }
 }
 
 pub trait ReadsFasta {
-    fn read_to_bytes(&mut self, refname: &str) -> Result<Option<i64>, Error>;
-    fn yield_seq(&self) -> Option<&[u8]>;
+    fn read_to_bytes(&mut self, refname: &str) -> Result<Option<Vec<u8>>, Error>;
+}
+
+impl ReadsFasta for NoReader {
+    fn read_to_bytes(&mut self, _refname: &str) -> Result<Option<Vec<u8>>, Error> {
+        Ok(None)
+    }
 }
 
 impl ReadsFasta for FastaIndexedReader {
-    fn read_to_bytes(&mut self, refname: &str) -> Result<Option<i64>, Error> {
+    fn read_to_bytes(&mut self, refname: &str) -> Result<Option<Vec<u8>>, Error> {
         // ref not found
         if self.inner.fetch_all(refname).is_err() {
             warn!("Unable to find ref {refname} in fasta. Proceeding without reference...");
             return Ok(None);
         };
 
-        self.inner.read(&mut self.data)?;
+        let mut output = Vec::new();
+        self.inner.read(&mut output)?;
 
-        Ok(Some(self.data.len() as i64))
-    }
-
-    fn yield_seq(&self) -> Option<&[u8]> {
-        if self.data.is_empty() {
-            None
-        } else {
-            Some(self.data.as_slice())
-        }
+        Ok(Some(output))
     }
 }
 
 impl ReadsFasta for FastaReader {
-    fn read_to_bytes(&mut self, refname: &str) -> Result<Option<i64>, Error> {
+    fn read_to_bytes(&mut self, refname: &str) -> Result<Option<Vec<u8>>, Error> {
+        let mut record: Record = Default::default();
+
         loop {
-            self.inner.read(&mut self.data)?;
-            if self.data.id() == refname {
-                return Ok(Some(self.data.seq().len() as i64)); // found it
-            } else if self.data.seq().is_empty() {
+            self.inner.read(&mut record)?;
+            if record.id() == refname {
+                return Ok(Some(record.seq().to_vec())); // found it
+            } else if record.seq().is_empty() {
                 return Ok(None); // read through all refs without finding one matching the given id
             }
-        }
-    }
-
-    fn yield_seq(&self) -> Option<&[u8]> {
-        if self.data.seq().is_empty() {
-            None
-        } else {
-            Some(self.data.seq())
         }
     }
 }
 
 pub struct RefSeq {
     reader: Box<dyn ReadsFasta>,
+    data: Option<Arc<Vec<u8>>>,
 }
 
 impl RefSeq {
@@ -79,30 +79,45 @@ impl RefSeq {
         if !faidx.exists() {
             let reader = FastaReader {
                 inner: fasta::Reader::from_file(Path::new(&file))?,
-                data: Record::new(),
             };
 
             Ok(Self {
                 reader: Box::new(reader),
+                data: None,
             })
         } else {
             let reader = FastaIndexedReader {
                 inner: fasta::IndexedReader::from_file(&Path::new(&file))?,
-                data: vec![],
             };
 
             Ok(Self {
                 reader: Box::new(reader),
+                data: None,
             })
         }
     }
 
+    pub fn blank() -> Self {
+        Self {
+            reader: Box::new(NoReader::new()),
+            data: None,
+        }
+    }
+
     pub fn load_seq(&mut self, t_name: &str) -> Result<(), Error> {
-        self.reader.read_to_bytes(t_name)?.unwrap_or(0);
+        self.data = if let Some(bytes) = self.reader.read_to_bytes(t_name)? {
+            Some(Arc::new(bytes))
+        } else {
+            None
+        };
         Ok(())
     }
 
-    pub fn yield_seq(&self) -> Option<&[u8]> {
-        self.reader.yield_seq()
+    pub fn yield_handle(&self) -> Option<Arc<Vec<u8>>> {
+        if let Some(ref refseq) = self.data {
+            Some(Arc::clone(refseq))
+        } else {
+            None
+        }
     }
 }

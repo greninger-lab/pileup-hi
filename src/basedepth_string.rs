@@ -1,4 +1,4 @@
-use crate::{alignment::PileupAlignment, output::OrderedPileupOutput};
+use crate::{alignment::PileupAlignment, engine::RefSeqHandle, output::OrderedPileupOutput};
 use anyhow::Error;
 use indexmap::IndexMap;
 use rust_htslib::bam::record::Cigar;
@@ -33,12 +33,12 @@ impl OrderedPileupOutput for BaseDepthString {
         self.pos
     }
 
-    fn set_ref_info(&mut self, tid: i32, pos: i64, ref_name: &str, _ref_seq: Option<&[u8]>) {
+    fn set_ref_info(&mut self, tid: i32, pos: i64, ref_name: &str, _ref_seq: &RefSeqHandle) {
         self.update(tid, pos, ref_name);
     }
 
     #[inline(always)]
-    fn intake(&mut self, p: &PileupAlignment, refseq: Option<&[u8]>) -> Result<(), Error> {
+    fn intake(&mut self, p: &PileupAlignment, refseq: &RefSeqHandle) -> Result<(), Error> {
         self.intake(p, refseq)
     }
 
@@ -166,13 +166,13 @@ impl BaseDepthString {
     }
 
     #[inline(always)]
-    pub fn intake(&mut self, p: &PileupAlignment, refseq: Option<&[u8]>) -> Result<(), Error> {
+    pub fn intake(&mut self, p: &PileupAlignment, refseq: &RefSeqHandle) -> Result<(), Error> {
         self.depth += 1;
         self.register_pileup(p, refseq)
     }
 
     #[inline(always)]
-    pub fn register_pileup(&mut self, p: &PileupAlignment, refseq: Option<&[u8]>) -> Result<(), Error> {
+    pub fn register_pileup(&mut self, p: &PileupAlignment, refseq: &RefSeqHandle) -> Result<(), Error> {
         match p.del {
             false => {
                 let readbase = if p.qpos < p.rec.seq_len() {
@@ -213,7 +213,7 @@ impl BaseDepthString {
             let mut refbase;
 
             for i in 1..=del_len as usize {
-                refbase = if let Some(refseq) = refseq {
+                refbase = if let Some(ref refseq) = refseq {
                     refseq[self.pos as usize + i]
                 } else {
                     b'N'

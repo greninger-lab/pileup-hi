@@ -1,5 +1,5 @@
-use crate::alignment::PileupAlignment;
 use crate::output::OrderedPileupOutput;
+use crate::{alignment::PileupAlignment, engine::RefSeqHandle};
 use anyhow::Error;
 use rust_htslib::bam::record::Cigar;
 use std::io::Write;
@@ -36,11 +36,11 @@ impl OrderedPileupOutput for PileupString {
         self.ref_pos
     }
 
-    fn set_ref_info(&mut self, tid: i32, pos: i64, ref_name: &str, ref_seq: Option<&[u8]>) {
+    fn set_ref_info(&mut self, tid: i32, pos: i64, ref_name: &str, ref_seq: &RefSeqHandle) {
         self.update(tid, pos, ref_name, ref_seq);
     }
 
-    fn intake(&mut self, p: &PileupAlignment, refseq: Option<&[u8]>) -> Result<(), Error> {
+    fn intake(&mut self, p: &PileupAlignment, refseq: &RefSeqHandle) -> Result<(), Error> {
         self.intake(p, refseq)
     }
 
@@ -64,7 +64,7 @@ impl OrderedPileupOutput for PileupString {
 }
 
 impl PileupString {
-    pub fn update(&mut self, tid: i32, ref_pos: i64, ref_name: &str, ref_seq: Option<&[u8]>) {
+    pub fn update(&mut self, tid: i32, ref_pos: i64, ref_name: &str, ref_seq: &RefSeqHandle) {
         self.tid = tid;
         self.ref_pos = ref_pos;
 
@@ -80,7 +80,7 @@ impl PileupString {
     }
 
     #[inline(always)]
-    pub fn intake(&mut self, p: &PileupAlignment, refseq: Option<&[u8]>) -> Result<(), Error> {
+    pub fn intake(&mut self, p: &PileupAlignment, refseq: &RefSeqHandle) -> Result<(), Error> {
         self.depth += 1;
         write_plp(p, self.ref_pos, &mut self.seqbuf, &mut self.qualbuf, refseq)?;
         Ok(())
@@ -223,7 +223,7 @@ pub fn write_plp(
     pos: i64,
     seq_buf: &mut Vec<u8>,
     qualbuf: &mut Vec<u8>,
-    refseq: Option<&[u8]>,
+    refseq: &RefSeqHandle,
 ) -> Result<(), Error> {
     if p.head {
         seq_buf.push(FIRST_POS);
@@ -279,7 +279,7 @@ pub fn write_plp(
     if del_len > 0 {
         write!(seq_buf, "{}", -del_len)?;
         for i in 1..=del_len as i64 {
-            refbase = if let Some(refseq) = refseq {
+            refbase = if let Some(ref refseq) = refseq {
                 refseq[(pos + i) as usize]
             } else {
                 b'N'

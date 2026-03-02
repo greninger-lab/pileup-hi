@@ -7,9 +7,11 @@ use crate::{
     params::{InputParams, PileupParams},
     pileup_iterator::PileupIterator,
     position_queue::{create_region_queue, intervals_from_header, GenomeInterval},
+    refseq::RefSeq,
     utils::OutputWriter,
 };
 
+use std::sync::Arc;
 use std::time::Instant;
 
 const OUTPUT_ARRAY_YIELD_SIZE: i64 = 2000;
@@ -37,13 +39,13 @@ impl PileupWorker {
         Self { interval, params, src }
     }
 
-    pub fn run<T>(&mut self, o: T, out: OutputWriter)
+    pub fn run<T>(&mut self, o: T, out: OutputWriter, refseq: RefSeqHandle)
     where
         T: OrderedPileupOutput + 'static,
     {
         let mut iterator = PileupIterator::new(
             &self.src,
-            std::slice::from_ref(&self.interval),
+            refseq,
             &self.params,
             o,
             OutputMethod::QueueForOutput(PileupOutputArray::new(
@@ -53,9 +55,11 @@ impl PileupWorker {
         )
         .unwrap();
 
-        iterator.auto_loop2(std::slice::from_ref(&self.interval)).unwrap();
+        iterator.auto_loop2(&self.interval).unwrap();
     }
 }
+
+pub type RefSeqHandle = Option<Arc<Vec<u8>>>;
 
 pub struct PileupEngine<T: OrderedPileupOutput> {
     intervals: Vec<GenomeInterval>,
@@ -63,6 +67,7 @@ pub struct PileupEngine<T: OrderedPileupOutput> {
     src: BamDataSource,
     output: T,
     dest: OutputDataDest,
+    refseq: RefSeq,
 }
 
 impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
@@ -79,12 +84,19 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
             intervals_from_header(header)?
         };
 
+        let refseq = if let Some(ref_file) = &plp_params.refseq {
+            RefSeq::from_file(ref_file)?
+        } else {
+            RefSeq::blank()
+        };
+
         Ok(Self {
             intervals,
             plp_params,
             src,
             output,
             dest,
+            refseq,
         })
     }
 
@@ -123,21 +135,26 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
     }
 
     /// Use a single thread for both processing and writing.
-    pub fn run_single(self) -> Result<(), Error> {
-        let lock = Box::new(BufWriter::with_capacity(2 * 1024 * 1024, std::io::stdout().lock()));
-        let mut iterator = PileupIterator::new(
-            &self.src,
-            &self.intervals,
-            &self.plp_params,
-            self.output.clone(),
-            OutputMethod::WriteDirectly(self.output.clone(), lock),
-        )?;
+    pub fn run_single(mut self) -> Result<(), Error> {
+        for interval in self.intervals.iter() {
+            self.refseq.load_seq(&interval.name)?;
+            let lock = Box::new(BufWriter::with_capacity(2 * 1024 * 1024, std::io::stdout().lock()));
 
-        iterator.auto_loop2(&self.intervals)
+            let mut iterator = PileupIterator::new(
+                &self.src,
+                self.refseq.yield_handle(),
+                &self.plp_params,
+                self.output.clone(),
+                OutputMethod::WriteDirectly(self.output.clone(), lock),
+            )?;
+
+            iterator.auto_loop2(interval)?;
+        }
+        Ok(())
     }
 
     /// Use separate threads for processing and writing. Each processing thread owns its IO readers for input BAM, index, and any other files.
-    pub fn run_multi(self) -> Result<(), Error> {
+    pub fn run_multi(mut self) -> Result<(), Error> {
         let outprefix = self.src.fname()?;
 
         let threadpool = rayon::ThreadPoolBuilder::new()
@@ -146,6 +163,7 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
             .unwrap();
 
         for interval in &self.intervals {
+            self.refseq.load_seq(&interval.name)?;
             let mut output_merge_lock = FILE_MERGE_SINGLETON.lock().expect("Failed to lock output file mutex");
 
             // we update the singleton tracking temp output files in case the program exits before finishing. This way the files
@@ -167,10 +185,6 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
                 }
                 .collect::<Vec<GenomeInterval>>();
 
-            //let per_thread_intervals = interval
-            //    .n_chunks(self.plp_params.threads as i64)
-            //    .collect::<Vec<GenomeInterval>>();
-
             info!(
                 "Split ref {} into {} chunks...",
                 interval.name,
@@ -181,11 +195,13 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
 
             let before = Instant::now();
 
+            let refhandle = self.refseq.yield_handle();
+
             threadpool.install(|| {
                 per_thread_intervals.par_iter().enumerate().for_each(|(i, chunk)| {
                     let mut worker = PileupWorker::new(self.plp_params.clone(), chunk.clone(), src.clone());
                     let writer = local_outputs.get_writer(i).expect("failed to get writer");
-                    worker.run(self.output.clone(), writer);
+                    worker.run(self.output.clone(), writer, refhandle.clone());
                 });
             });
 

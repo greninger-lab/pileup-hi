@@ -1,6 +1,6 @@
 use crate::alignment::PileupAlignment;
 use crate::bamio::OutputDataDest;
-use crate::engine::BUFWRITER_CAP;
+use crate::engine::{RefSeqHandle, BUFWRITER_CAP};
 use crate::utils::{get_writer, temp_fname, OutputWriter};
 use anyhow::Error;
 use log::warn;
@@ -23,9 +23,9 @@ pub trait OrderedPileupOutput: Send + Sync + Clone + std::fmt::Debug {
     #[allow(dead_code)]
     fn pos(&self) -> i64;
     /// Update internal data with pileup alignment
-    fn intake(&mut self, p: &PileupAlignment, refseq: Option<&[u8]>) -> Result<(), Error>;
+    fn intake(&mut self, p: &PileupAlignment, refseq: &RefSeqHandle) -> Result<(), Error>;
     /// Update reference data given ref num, pos, name, and sequence
-    fn set_ref_info(&mut self, tid: i32, pos: i64, ref_name: &str, ref_seq: Option<&[u8]>);
+    fn set_ref_info(&mut self, tid: i32, pos: i64, ref_name: &str, refseq: &RefSeqHandle);
     fn write<W: std::io::Write>(&mut self, writer: &mut W) -> Result<(), Error>;
     fn depth(&self) -> u32;
     fn clear(&mut self);

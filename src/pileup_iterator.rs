@@ -2,14 +2,13 @@ use crate::{
     bamio::{BamDataSource, BamReader},
     baq::realign_record,
     cigar_resolve::resolve_cigar,
-    engine::MIN_BAM_READ_THREADS,
+    engine::{RefSeqHandle, MIN_BAM_READ_THREADS},
     output::{OrderedPileupOutput, OutputMethod},
     overlap::MapOverlaps,
     params::PileupParams,
     position_queue::GenomeInterval,
     read_buf::{BufPushResult, ReadBuffer},
     read_filter::ReadFilter,
-    refseq::RefSeq,
     utils::read_ends_before_pos,
 };
 
@@ -48,7 +47,7 @@ pub struct PileupIterator<T: OrderedPileupOutput> {
     output: Option<T>,
     dest: OutputMethod<T>,
     pub reader: BamReader,
-    refseq: Option<RefSeq>,
+    refseq: RefSeqHandle,
     read_filter: ReadFilter,
     cur_rec: Record,
     realign: bool,
@@ -64,12 +63,11 @@ impl<T: OrderedPileupOutput> PileupIterator<T> {
     /// input params and an output type.
     pub fn new(
         src: &BamDataSource,
-        intervals: &[GenomeInterval],
+        refseq: RefSeqHandle,
         params: &PileupParams,
         output: T,
         dest: OutputMethod<T>,
     ) -> Result<Self, Error> {
-        assert!(!intervals.is_empty());
         let reader = BamReader::new(src, MIN_BAM_READ_THREADS)?;
 
         let rbuf = ReadBuffer::new(params.depth, params.disable_overlaps);
@@ -92,12 +90,6 @@ impl<T: OrderedPileupOutput> PileupIterator<T> {
 
         let min_baseq = params.min_baseq;
         let min_mapq = params.min_mapq;
-
-        let refseq = if let Some(ref_file) = &params.refseq {
-            Some(RefSeq::from_file(ref_file)?)
-        } else {
-            None
-        };
 
         let pos @ next_pos @ max_pos = -1;
         let tid @ next_tid @ last_tid_with_cov = -1;
@@ -145,17 +137,17 @@ impl<T: OrderedPileupOutput> PileupIterator<T> {
             }
         }
 
-        let ref_sequence = &mut self.refseq.as_ref().and_then(|r| r.yield_seq());
+        // let ref_sequence = &mut self.refseq.as_ref().and_then(|r| r.yield_seq());
         let rbuf = &mut self.rbuf;
         let generated;
         let depth;
 
         {
             let output = self.dest.cur();
-            output.set_ref_info(self.tid, self.pos, &self.reader.cur_ref, *ref_sequence);
+            output.set_ref_info(self.tid, self.pos, &self.reader.cur_ref, &self.refseq);
 
             if !skip {
-                generated = generate_pileup(rbuf, ref_sequence, output, self.pos, self.tid, self.min_baseq)?;
+                generated = generate_pileup(rbuf, &self.refseq, output, self.pos, self.tid, self.min_baseq)?;
                 depth = output.depth();
             } else {
                 generated = false;
@@ -218,7 +210,7 @@ impl<T: OrderedPileupOutput> PileupIterator<T> {
         // purge read buffer to remove any reads spanning the old ref to update head and tail.
         generate_pileup(
             &mut self.rbuf,
-            &self.refseq.as_ref().and_then(|r| r.yield_seq()),
+            &self.refseq,
             &mut output,
             i64::MAX,
             self.tid,
@@ -231,7 +223,8 @@ impl<T: OrderedPileupOutput> PileupIterator<T> {
         if interval.start != 0 && self.rbuf.overlap_map.is_some() {
             self.preload_region(&interval)?;
         } else {
-            self.reader.init_to_ref(interval.tid as u32, interval.start, interval.end)?;
+            self.reader
+                .init_to_ref(interval.tid as u32, interval.start, interval.end)?;
             self.pos = interval.start;
             self.next_pos = interval.start;
         }
@@ -241,9 +234,9 @@ impl<T: OrderedPileupOutput> PileupIterator<T> {
 
         self.max_pos = interval.end - 1;
 
-        if let Some(refseq) = &mut self.refseq {
-            refseq.load_seq(&self.reader.cur_ref)?;
-        }
+        // if let Some(refseq) = &mut self.refseq {
+        //     refseq.load_seq(&self.reader.cur_ref)?;
+        // }
 
         Ok(())
     }
@@ -279,7 +272,7 @@ impl<T: OrderedPileupOutput> PileupIterator<T> {
                 }
 
                 if self.realign {
-                    if let Some(refseq) = self.refseq.as_ref().and_then(|r| r.yield_seq()) {
+                    if let Some(ref refseq) = self.refseq {
                         let flag = if self.redo_baq { 7 } else { 3 };
                         realign_record(r, refseq, refseq.len() as i64, flag)?;
                     }
@@ -324,23 +317,22 @@ impl<T: OrderedPileupOutput> PileupIterator<T> {
     }
 
     /// main function of the PileupIterator: run it on all the query intervals given.
-    pub fn auto_loop2(&mut self, intervals: &[GenomeInterval]) -> Result<(), Error> {
+    pub fn auto_loop2(&mut self, interval: &GenomeInterval) -> Result<(), Error> {
         self.read_len = BamReader::sample_read_len(&self.reader.src)?;
 
-        for interval in intervals {
-            self.set_ref(interval.clone())?;
-            self.process_single_ref()?;
+        self.set_ref(interval.clone())?;
+        self.process_single_ref()?;
 
-            match self.emit {
-                EmitStrategy::ByRef | EmitStrategy::Everything => {
-                    while self.pos <= self.max_pos {
-                        self.set_pileup()?;
-                        self.pos += 1;
-                    }
+        match self.emit {
+            EmitStrategy::ByRef | EmitStrategy::Everything => {
+                while self.pos <= self.max_pos {
+                    self.set_pileup()?;
+                    self.pos += 1;
                 }
-                _ => (),
             }
+            _ => (),
         }
+
         Ok(())
     }
 
@@ -410,7 +402,7 @@ pub enum IterResult {
 /// buffer.
 pub fn generate_pileup<T: OrderedPileupOutput>(
     rbuf: &mut ReadBuffer,
-    ref_sequence: &Option<&[u8]>,
+    refseq: &RefSeqHandle,
     out: &mut T,
     pos: i64,
     tid: i32,
@@ -459,7 +451,7 @@ pub fn generate_pileup<T: OrderedPileupOutput>(
             continue;
         }
 
-        out.intake(&r, *ref_sequence)?;
+        out.intake(&r, refseq)?;
 
         drop(r);
         rbuf.backup_buf.push(raw);
