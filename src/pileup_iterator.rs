@@ -265,17 +265,17 @@ impl<T: OrderedPileupOutput> PileupIterator<T> {
                     continue;
                 }
 
-                // we passed queried region
-                if r.pos() > self.max_pos {
-                    self.rbuf.attempt_push(self.tid, self.pos, r)?;
-                    return Ok(IterResult::ReferenceEnd);
-                }
-
                 if self.realign {
                     if let Some(ref refseq) = self.refseq {
                         let flag = if self.redo_baq { 7 } else { 3 };
                         realign_record(r, refseq, refseq.len() as i64, flag)?;
                     }
+                }
+
+                // we passed queried region
+                if r.pos() > self.max_pos {
+                    self.rbuf.attempt_push(self.tid, self.pos, r)?;
+                    return Ok(IterResult::ReferenceEnd);
                 }
 
                 if r.mapq() < self.min_mapq {
