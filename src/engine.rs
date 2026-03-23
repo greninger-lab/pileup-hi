@@ -253,22 +253,20 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
     /// next one. if we are processing eukaryotic genomes and have multiple chromosomes in memory, that
     /// will get ugly very fast; better to have one or two in memory at a time.
     pub fn run_multi(self) -> Result<(), Error> {
+        let main_writer = get_writer_multi(&self.dest, BUFWRITER_CAP, true, false)?;
+
         let mut jobs = IntervalJobs::new(
             &self.intervals,
             self.plp_params.coords_per_thread,
             self.plp_params.threads as i64,
+            main_writer,
         );
-
-        let mut main_writer: Box<dyn std::io::Write> = match self.dest {
-            OutputDataDest::File(_) => Box::new(get_writer_multi(&self.dest, BUFWRITER_CAP, true, false)?),
-            OutputDataDest::Stdout => Box::new(BufWriter::with_capacity(BUFWRITER_CAP, std::io::stdout().lock())),
-        };
 
         let mut pool = ThreadPool::new(self.plp_params.threads);
         let mut n_jobs = 0;
 
         while !jobs.is_completed() {
-            jobs.merge_completed(&mut main_writer)?;
+            jobs.merge_completed()?;
 
             if let Some(worker) = pool.get_available() {
                 if let Some(job) = jobs.queue.pop_front() {
@@ -292,8 +290,6 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
                 }
             }
         }
-
-        jobs.merge_completed(&mut main_writer)?;
-        Ok(())
+        jobs.conclude()
     }
 }

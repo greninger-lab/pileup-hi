@@ -3,8 +3,9 @@ use crate::bamio::OutputDataDest;
 use crate::utils::{temp_fname, OutputWriter};
 use crate::{position_queue::GenomeInterval, refseq::RefSeqHandle};
 use anyhow::Error;
-use log::warn;
-use std::collections::{HashMap, VecDeque};
+use crossbeam::channel::{unbounded, Receiver, Sender};
+use log::{info, warn};
+use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{BufReader, Write};
 use std::sync::{Arc, Mutex};
@@ -55,10 +56,17 @@ pub type IntervalJob = Arc<IntervalJobInner>;
 pub struct IntervalJobs {
     map: VecDeque<(GenomeInterval, Vec<IntervalJob>)>,
     pub queue: VecDeque<IntervalJob>,
+    handle: std::thread::JoinHandle<()>,
+    s: Sender<Vec<IntervalJob>>,
 }
 
 impl IntervalJobs {
-    pub fn new(intervals: &[GenomeInterval], min_coords_per_thread: i64, threads: i64) -> Self {
+    pub fn new(
+        intervals: &[GenomeInterval],
+        min_coords_per_thread: i64,
+        threads: i64,
+        mut main_writer: OutputWriter,
+    ) -> Self {
         let mut map: VecDeque<(GenomeInterval, Vec<IntervalJob>)> = VecDeque::new();
         let mut queue: VecDeque<IntervalJob> = VecDeque::new();
         let mut lock = FILE_MERGE_SINGLETON.lock().unwrap();
@@ -80,50 +88,50 @@ impl IntervalJobs {
             map.push_back((interval.clone(), chunks.clone()));
         }
 
-        Self { map, queue }
-    }
+        let (s, r): (Sender<Vec<IntervalJob>>, Receiver<Vec<IntervalJob>>) = unbounded();
 
-    fn merge<W: std::io::Write>(dest: &mut W, temps: Vec<IntervalJob>) -> Result<(), Error> {
-        assert!(!temps.is_empty());
+        let handle = std::thread::spawn(move || {
+            while let Ok(temps) = r.recv() {
+                for tmp in temps {
+                    match tmp.out {
+                        OutputDataDest::Stdout => panic!("cannot merge from stdout! Critical error"),
+                        OutputDataDest::File(ref f) => {
+                            match File::open(f) {
+                                Err(e) => {
+                                    match e.kind() {
+                                        std::io::ErrorKind::NotFound => (),
+                                        _ => panic!("Failed to open output file for merging: {}", e),
+                                    };
+                                }
 
-        for tmp in temps {
-            match tmp.out {
-                OutputDataDest::Stdout => anyhow::bail!("cannot merge from stdout! Critical error"),
-                OutputDataDest::File(ref f) => {
-                    match File::open(f) {
-                        Err(e) => {
-                            match e.kind() {
-                                std::io::ErrorKind::NotFound => (),
-                                _ => anyhow::bail!("Failed to open output file for merging: {}", e),
-                            };
-                        }
-
-                        Ok(f) => {
-                            let mut reader = BufReader::with_capacity(2 * 1024 * 1024, f);
-                            std::io::copy(&mut reader, dest)?;
-                        }
-                    }
-                    if let Err(e) = std::fs::remove_file(f) {
-                        match e.kind() {
-                            std::io::ErrorKind::NotFound => (),
-                            _ => anyhow::bail!(e),
+                                Ok(f) => {
+                                    let mut reader = BufReader::with_capacity(2 * 1024 * 1024, f);
+                                    std::io::copy(&mut reader, &mut main_writer).unwrap();
+                                }
+                            }
+                            if let Err(e) = std::fs::remove_file(f) {
+                                match e.kind() {
+                                    std::io::ErrorKind::NotFound => (),
+                                    _ => panic!("{}", e),
+                                }
+                            }
                         }
                     }
                 }
             }
-        }
+        });
 
-        Ok(())
+        Self { map, handle, queue, s }
     }
 
     pub fn is_completed(&self) -> bool {
         self.map.is_empty()
     }
 
-    pub fn merge_completed<W: std::io::Write>(&mut self, dest: &mut W) -> Result<(), Error> {
+    pub fn merge_completed(&mut self) -> Result<(), Error> {
         let mut done = 0;
 
-        if let Some((_tid, pending)) = self.map.front() {
+        if let Some((interval, pending)) = self.map.front() {
             for tmp in pending {
                 if *tmp.done.lock().unwrap() {
                     done += 1;
@@ -132,11 +140,19 @@ impl IntervalJobs {
 
             assert!(done <= pending.len());
             if done == pending.len() {
+                info!("Finished ref {}", interval.name);
                 let (_, to_merge) = self.map.pop_front().unwrap();
-                IntervalJobs::merge(dest, to_merge)?;
+                self.s.send(to_merge)?;
             }
         }
 
+        Ok(())
+    }
+
+    pub fn conclude(mut self) -> Result<(), Error> {
+        self.merge_completed()?;
+        drop(self.s);
+        self.handle.join().expect("Failed to join writer thread");
         Ok(())
     }
 }
