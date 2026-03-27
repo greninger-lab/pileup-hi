@@ -1,13 +1,14 @@
 use crate::alignment::PileupAlignment;
 use crate::bamio::OutputDataDest;
-use crate::utils::{temp_fname, OutputWriter};
+use crate::engine::BUFWRITER_CAP;
+use crate::utils::{get_writer_multi, temp_fname, OutputWriter};
 use crate::{position_queue::GenomeInterval, refseq::RefSeqHandle};
 use anyhow::Error;
 use crossbeam::channel::{unbounded, Receiver, Sender};
 use log::{info, warn};
 use std::collections::VecDeque;
 use std::fs::File;
-use std::io::{BufReader, Write};
+use std::io::BufReader;
 use std::sync::{Arc, Mutex};
 
 pub static FILE_MERGE_SINGLETON: Mutex<Vec<OutputDataDest>> = Mutex::new(vec![]);
@@ -18,16 +19,23 @@ pub trait OrderedPileupOutput: Send + Sync + Clone + std::fmt::Debug {
     /// Get the reference of the pileup
     #[allow(dead_code)]
     fn tid(&self) -> i32;
+
     /// Get the coordinate of the pileup
     #[allow(dead_code)]
     fn pos(&self) -> i64;
+
     /// Update internal data with pileup alignment
     fn intake(&mut self, p: &PileupAlignment, refseq: &RefSeqHandle) -> Result<(), Error>;
     /// Update reference data given ref num, pos, name, and sequence
     fn set_ref_info(&mut self, tid: i32, pos: i64, ref_name: &str, refseq: &RefSeqHandle);
+
     fn write<W: std::io::Write>(&mut self, writer: &mut W) -> Result<(), Error>;
+
     fn depth(&self) -> u32;
+
     fn clear(&mut self);
+
+    #[allow(dead_code)]
     fn new() -> Self;
 }
 
@@ -63,12 +71,7 @@ pub struct IntervalJobs {
 }
 
 impl IntervalJobs {
-    pub fn new(
-        intervals: &[GenomeInterval],
-        min_coords_per_thread: i64,
-        threads: i64,
-        mut main_writer: OutputWriter,
-    ) -> Self {
+    pub fn new(intervals: &[GenomeInterval], min_coords_per_thread: i64, threads: i64, output: OutputDataDest) -> Self {
         let mut map: VecDeque<(GenomeInterval, Vec<IntervalJob>)> = VecDeque::new();
         let mut queue: VecDeque<IntervalJob> = VecDeque::new();
         let mut lock = FILE_MERGE_SINGLETON.lock().unwrap();
@@ -93,6 +96,7 @@ impl IntervalJobs {
         let (s, r): (Sender<Vec<IntervalJob>>, Receiver<Vec<IntervalJob>>) = unbounded();
 
         let handle = std::thread::spawn(move || {
+            let mut main_writer = get_writer_multi(&output, BUFWRITER_CAP, true, false).unwrap();
             while let Ok(temps) = r.recv() {
                 for tmp in temps {
                     match tmp.out {
@@ -188,108 +192,35 @@ pub fn setup_exit_handler() {
     })
     .expect("Failed to set exit handler")
 }
-
-/// A buffer of pileup output structs. Once its capacity is exceeded, it writes itself to its designed output file. Used to reduce system calls to file writing, though I haven't benchmarked
-/// without it.
-pub struct PileupOutputArray<T: OrderedPileupOutput> {
-    data: Vec<T>,
-    writable: Vec<bool>,
-    cur: usize,
-    capacity: usize,
+pub struct OutputFormat<T: OrderedPileupOutput> {
+    output: T,
     writer: OutputWriter,
 }
 
-impl<T: OrderedPileupOutput> PileupOutputArray<T> {
-    pub fn new(capacity: usize, writer: OutputWriter) -> Self {
-        Self {
-            data: vec![T::new(); capacity],
-            writable: vec![true; capacity],
-            cur: 0,
-            capacity,
-            writer,
-        }
+impl<T: OrderedPileupOutput> OutputFormat<T> {
+    pub fn new(output: T, writer: OutputWriter) -> Self {
+        Self { output, writer }
     }
 
-    pub fn cur_mut(&mut self) -> &mut T {
-        &mut self.data[self.cur]
+    pub fn reject(&mut self) -> bool {
+        self.output.clear();
+        false
     }
 
-    // no-op
-    pub fn push(&mut self) {}
-
-    pub fn tombstone(&mut self) {
-        self.writable[self.cur] = false
-    }
-
-    pub fn advance(&mut self) -> Result<(), Error> {
-        self.cur += 1;
-
-        if self.cur >= self.capacity {
-            self.write_all()?;
-        }
-
-        Ok(())
-    }
-
-    pub fn write_all(&mut self) -> Result<(), Error> {
-        for i in 0..self.cur {
-            if self.writable[i] {
-                self.data[i].write(&mut self.writer)?;
-            } else {
-                self.data[i].clear();
-            }
-        }
-
-        self.cur = 0;
-        self.writable.fill(true);
-        Ok(())
-    }
-}
-
-/// Defines how to get output data from iterators from a thread. If using a single thread, we can just print directly and not waste memory queueing output.
-pub enum OutputMethod<T: OrderedPileupOutput> {
-    WriteDirectly(T, Box<dyn Write>),
-    QueueForOutput(PileupOutputArray<T>),
-}
-
-impl<T: OrderedPileupOutput> OutputMethod<T> {
     pub fn cur(&mut self) -> &mut T {
-        match self {
-            Self::WriteDirectly(output, _writer) => output,
-            Self::QueueForOutput(output_arr) => output_arr.cur_mut(),
-        }
+        &mut self.output
     }
 
-    pub fn reject(&mut self) -> Result<bool, Error> {
-        match self {
-            Self::WriteDirectly(output, _writer) => output.clear(),
-            Self::QueueForOutput(output_arr) => {
-                output_arr.tombstone();
-                output_arr.advance()?;
-            }
-        }
-        Ok(false)
+    pub fn take(&mut self) -> Result<bool, Error> {
+        self.output.write(&mut self.writer)?;
+        Ok(true)
     }
 
     pub fn check(&mut self, emit: bool) -> Result<bool, Error> {
         if emit {
-            self.take()?;
-            Ok(true)
+            self.take()
         } else {
-            self.reject()?;
-            Ok(false)
+            Ok(self.reject())
         }
-    }
-
-    pub fn take(&mut self) -> Result<bool, Error> {
-        match self {
-            Self::WriteDirectly(output, writer) => output.write(writer)?,
-            Self::QueueForOutput(output_arr) => {
-                output_arr.push();
-                output_arr.advance()?;
-            }
-        }
-
-        Ok(true)
     }
 }

@@ -3,7 +3,7 @@ use crate::{
     baq::realign_record,
     cigar_resolve::resolve_cigar,
     engine::MIN_BAM_READ_THREADS,
-    output::{OrderedPileupOutput, OutputMethod},
+    output::{OrderedPileupOutput, OutputFormat},
     overlap::MapOverlaps,
     params::PileupParams,
     position_queue::GenomeInterval,
@@ -45,8 +45,7 @@ pub struct PileupIterator<T: OrderedPileupOutput> {
     emit: EmitStrategy,
 
     rbuf: ReadBuffer,
-    output: Option<T>,
-    dest: OutputMethod<T>,
+    dest: OutputFormat<T>,
     pub reader: BamReader,
     refseq: RefSeqHandle,
     read_filter: ReadFilter,
@@ -66,8 +65,7 @@ impl<T: OrderedPileupOutput> PileupIterator<T> {
         src: &BamDataSource,
         refseq: RefSeqHandle,
         params: &PileupParams,
-        output: T,
-        dest: OutputMethod<T>,
+        dest: OutputFormat<T>,
     ) -> Result<Self, Error> {
         let reader = BamReader::new(src, MIN_BAM_READ_THREADS)?;
 
@@ -103,7 +101,6 @@ impl<T: OrderedPileupOutput> PileupIterator<T> {
             next_pos,
             max_pos,
             rbuf,
-            output: Some(output),
             dest,
             emit,
             reader,
@@ -157,7 +154,7 @@ impl<T: OrderedPileupOutput> PileupIterator<T> {
         }
 
         let written = match self.emit {
-            EmitStrategy::Nothing => self.dest.reject()?,
+            EmitStrategy::Nothing => self.dest.reject(),
             EmitStrategy::ByPos => self.dest.check(generated || depth > 0)?,
             EmitStrategy::ByRef => self
                 .dest
@@ -206,20 +203,12 @@ impl<T: OrderedPileupOutput> PileupIterator<T> {
             anyhow::bail!("Interval has TID exceeding header maximum!");
         }
 
-        let mut output = self.output.take().unwrap();
+        let output = self.dest.cur();
 
         // purge read buffer to remove any reads spanning the old ref to update head and tail.
-        generate_pileup(
-            &mut self.rbuf,
-            &self.refseq,
-            &mut output,
-            i64::MAX,
-            self.tid,
-            self.min_baseq,
-        )?;
+        generate_pileup(&mut self.rbuf, &self.refseq, output, i64::MAX, self.tid, self.min_baseq)?;
 
         output.clear();
-        self.output = Some(output);
 
         if interval.start != 0 && self.rbuf.overlap_map.is_some() {
             self.preload_region(&interval)?;
@@ -380,12 +369,6 @@ impl<T: OrderedPileupOutput> PileupIterator<T> {
                     break;
                 }
             }
-        }
-
-        // if we are storing output in intermediate buffer, flush it.
-        match &mut self.dest {
-            OutputMethod::WriteDirectly(_, _) => (),
-            OutputMethod::QueueForOutput(out) => out.write_all()?,
         }
 
         Ok(())

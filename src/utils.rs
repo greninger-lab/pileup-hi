@@ -2,7 +2,7 @@ use std::{fs::OpenOptions, io::BufWriter};
 
 use crate::{alignment::PileupAlignment, bamio::OutputDataDest};
 
-pub type OutputWriter = BufWriter<Box<dyn std::io::Write + Send>>;
+pub type OutputWriter = BufWriter<Box<dyn std::io::Write>>;
 
 use anyhow::{Context, Error};
 
@@ -22,7 +22,7 @@ pub fn get_writer_multi(
     lock: bool,
     append: bool,
 ) -> Result<OutputWriter, Error> {
-    let dest: Box<dyn std::io::Write + Send> = match handle {
+    let dest: Box<dyn std::io::Write> = match handle {
         OutputDataDest::File(p) => {
             let mut o = OpenOptions::new();
             let file = o.write(true).create(true).append(append).open(p)?;
@@ -32,7 +32,14 @@ pub fn get_writer_multi(
             }
             Box::new(file)
         }
-        OutputDataDest::Stdout => Box::new(std::io::stdout()),
+
+        OutputDataDest::Stdout => {
+            if lock {
+                Box::new(std::io::stdout().lock())
+            } else {
+                Box::new(std::io::stdout())
+            }
+        }
     };
 
     Ok(BufWriter::with_capacity(writer_cap, dest))

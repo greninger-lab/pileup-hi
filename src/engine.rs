@@ -1,20 +1,18 @@
 use crate::{
     bamio::{BamDataSource, BamReader, OutputDataDest},
-    output::{IntervalJob, IntervalJobs, OrderedPileupOutput, OutputMethod, PileupOutputArray},
+    output::{IntervalJob, IntervalJobs, OrderedPileupOutput, OutputFormat},
     params::{InputParams, PileupParams},
     pileup_iterator::PileupIterator,
     position_queue::{create_region_queue, intervals_from_header, GenomeInterval},
     refseq::{RefSeq, RefSeqHandle},
-    utils::{get_writer_multi, OutputWriter},
+    utils::get_writer_multi,
 };
 
 use std::sync::{Arc, Condvar, Mutex};
 
 use anyhow::Error;
 use log::{info, warn};
-use std::io::BufWriter;
 
-const OUTPUT_ARRAY_YIELD_SIZE: i64 = 2000;
 pub const BUFWRITER_CAP: usize = 2 * 1024 * 1024;
 pub const MIN_BAM_READ_THREADS: usize = 2;
 
@@ -91,7 +89,6 @@ impl PileupWorker {
         job: IntervalJob,
         src: BamDataSource,
         o: T,
-        out: OutputWriter,
         refseq: RefSeqHandle,
     ) where
         T: OrderedPileupOutput + 'static,
@@ -102,17 +99,9 @@ impl PileupWorker {
         self.handle = Some(std::thread::spawn(move || {
             notify.mark_running();
 
-            let mut iterator = PileupIterator::new(
-                &src,
-                refseq,
-                &params,
-                o,
-                OutputMethod::QueueForOutput(PileupOutputArray::new(
-                    std::cmp::min((job.interval.len() / 10).max(1), OUTPUT_ARRAY_YIELD_SIZE) as usize,
-                    out,
-                )),
-            )
-            .unwrap();
+            let out = get_writer_multi(&job.out, BUFWRITER_CAP, true, false).unwrap();
+
+            let mut iterator = PileupIterator::new(&src, refseq, &params, OutputFormat::new(o, out)).unwrap();
 
             iterator.auto_loop2(&job.interval).unwrap();
 
@@ -149,13 +138,7 @@ impl ThreadPool {
     pub fn get_available(&mut self) -> Option<&mut PileupWorker> {
         self.notify.wait_while();
 
-        for worker in self.workers.iter_mut() {
-            if worker.is_finished() {
-                return Some(worker);
-            }
-        }
-
-        None
+        self.workers.iter_mut().find_map(|w| w.is_finished().then_some(w))
     }
 }
 
@@ -246,10 +229,7 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
     /// Use a single thread for both processing and writing.
     pub fn run_single(self) -> Result<(), Error> {
         for interval in self.intervals.iter() {
-            let main_writer: Box<dyn std::io::Write> = match self.dest {
-                OutputDataDest::File(_) => Box::new(get_writer_multi(&self.dest, BUFWRITER_CAP, true, false)?),
-                OutputDataDest::Stdout => Box::new(BufWriter::with_capacity(BUFWRITER_CAP, std::io::stdout().lock())),
-            };
+            let main_writer = get_writer_multi(&self.dest, BUFWRITER_CAP, true, false)?;
 
             let refseq_handle = self.get_refseq(&interval.name)?;
 
@@ -257,8 +237,7 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
                 &self.src,
                 refseq_handle,
                 &self.plp_params,
-                self.output.clone(),
-                OutputMethod::WriteDirectly(self.output.clone(), main_writer),
+                OutputFormat::new(self.output.clone(), main_writer),
             )?;
 
             iterator.auto_loop2(interval)?;
@@ -268,13 +247,11 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
 
     /// Split up a list of input genomic intervals into smaller chunks to be processed in parallel. Chunks are first written to temporary output files before being merged into the user-specified output file.
     pub fn run_multi(self) -> Result<(), Error> {
-        let main_writer = get_writer_multi(&self.dest, BUFWRITER_CAP, true, false)?;
-
         let mut jobs = IntervalJobs::new(
             &self.intervals,
             self.plp_params.coords_per_thread,
             self.plp_params.threads as i64,
-            main_writer,
+            self.dest.clone(),
         );
 
         let mut pool = ThreadPool::new(self.plp_params.threads);
@@ -289,15 +266,12 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
 
                     let refseq_handle = self.get_refseq(&job.interval.name)?;
 
-                    let writer = get_writer_multi(&job.out, BUFWRITER_CAP, true, false)?;
-
                     worker.run(
                         n_jobs,
                         self.plp_params.clone(),
                         job,
                         self.src.clone(),
                         self.output.clone(),
-                        writer,
                         refseq_handle,
                     );
                 }
