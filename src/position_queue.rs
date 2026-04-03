@@ -1,4 +1,5 @@
 use crate::errors::{Error, ErrorKind};
+use log::warn;
 use rust_htslib::bam::HeaderView;
 use std::ops::Not;
 
@@ -163,7 +164,7 @@ fn parse_region_string(s: &str) -> Result<RawPileupRegion, Error> {
 
             // We have something before and after a dash, so we expect numbers on both sides...
             Some((Some(start), Some(end))) => {
-                let start_pos = start.replace(",", "").parse::<i64>()?;
+                let mut start_pos = start.replace(",", "").parse::<i64>()?;
                 let end_pos = end.replace(",", "").parse::<i64>()?;
 
                 if start_pos < 0 {
@@ -171,6 +172,12 @@ fn parse_region_string(s: &str) -> Result<RawPileupRegion, Error> {
                         "Invalid region string {s}: cannot have negative start pos: {start_pos}"
                     ))));
                 };
+
+                if start_pos == 0 {
+                    warn!("start pos is 0: input regions are 1-based. Setting start pos to 1");
+                    start_pos = 1;
+                }
+
                 if end_pos < 0 {
                     return Err(Error::from(ErrorKind::BadInputRegions(format!(
                         "Invalid region string {s}: cannot have negative end pos: {end_pos}"
