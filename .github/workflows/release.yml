@@ -25,7 +25,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ github.ref_name }}
-          release_name: Release ${{ github.ref_name }}
+          release_name: ${{ github.ref_name }}
           draft: false
           prerelease: false
 
@@ -43,12 +43,12 @@ jobs:
             artifact_name: linux-x86_64
             
           # macOS x86-64
-          - os: macos-13
+          - os: macos-26-intel
             target: x86_64-apple-darwin
             artifact_name: macos-x86_64
             
           # macOS ARM64
-          - os: macos-14
+          - os: macos-26
             target: aarch64-apple-darwin
             artifact_name: macos-aarch64
 
@@ -117,15 +117,11 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: install dependencies
-        run:
-          sudo apt-get update 
+        run: |
+          sudo apt-get update
           sudo apt-get install -y \
             pkg-config \
-            libssl-dev \
-            zlib1g-dev \
-            libbz2-dev \
-            liblzma-dev \
-            libcurl14-openssl-dev \
             libhts-dev
+
       - name: publish to crates.io
         run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN_PILEUPHI }}
