@@ -9,6 +9,7 @@ homepage = "https://github.com/epiliper/pileup-hi"
 categories = ["science", "bam", "bioinformatics", "command-line-utilities"]
 keywords  = ["bam", "sequencing", "bioinformatics", "variant"]
 readme = "README.md"
+exclude = ["vendor/*"]
 
 [[bin]]
 name = "pileuphi"
