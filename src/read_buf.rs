@@ -2,6 +2,7 @@ use crate::alignment::{cigar2rlen, CigarState, PileupAlignment, PileupAlignmentR
 use crate::cigar_resolve::resolve_cigar;
 use crate::errors::{Error, ErrorKind};
 use crate::overlap::{MapOverlaps, OverlapMap};
+use likely_stable::unlikely;
 use rust_htslib::bam::Record;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
@@ -114,11 +115,11 @@ impl ReadBuffer {
         }
 
         // check for unsorted input
-        if r.tid() < self.tail.tid {
+        if unlikely(r.tid() < self.tail.tid) {
             return Err(Error::from(ErrorKind::BamNotSortedByReference(self.tail.tid, r.tid())));
         }
 
-        if r.pos() < self.tail.pos {
+        if unlikely(r.pos() < self.tail.pos) {
             return Err(Error::from(ErrorKind::BamNotSortedByCoordinate(self.tail.pos, r.pos())));
         }
 

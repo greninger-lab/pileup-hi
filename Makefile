@@ -6,4 +6,3 @@ build:
 
 test:
 	cargo test -- --show-output
-

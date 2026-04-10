@@ -1,43 +1,49 @@
 rustc-version-rs
-==============
+================
 
-[![Travis-CI Status](https://travis-ci.org/Kimundi/rustc-version-rs.png?branch=master)](https://travis-ci.org/Kimundi/rustc-version-rs)
+[![Documentation](https://docs.rs/rustc_version/badge.svg)](https://docs.rs/rustc_version/)
+[![Crates.io](https://img.shields.io/crates/v/rustc_version.svg)](https://crates.io/crates/rustc_version)
+[![Build status](https://github.com/djc/rustc-version-rs/workflows/CI/badge.svg)](https://github.com/djc/rustc-version-rs/actions?query=workflow%3ACI)
 
-A library for querying the version of a installed rustc compiler.
+A library for querying the version of a `rustc` compiler.
 
-For more details, see the [docs](http://kimundi.github.io/rustc-version-rs/rustc_version/index.html).
+This can be used by build scripts or other tools dealing with Rust sources
+to make decisions based on the version of the compiler. Current MSRV is 1.32.0.
+
+If this is of interest, also consider looking at these other crates:
+
+* [autocfg](https://crates.io/crates/autocfg/), which helps with feature detection instead of depending on compiler versions
+* [rustversion](https://github.com/dtolnay/rustversion) provides a procedural macro with no other dependencies
 
 # Getting Started
 
 [rustc-version-rs is available on crates.io](https://crates.io/crates/rustc_version).
-Add the following dependency to your Cargo manifest to get the latest version of the 0.1 branch:
-```toml
-[dependencies]
+It is recommended to look there for the newest released version, as well as links to the newest builds of the docs.
 
-rustc_version = "0.1.*"
-```
+At the point of the last update of this README, the latest published version could be used like this:
 
-To always get the latest version, add this git repository to your
-Cargo manifest:
+Add the following dependency to your Cargo manifest...
 
 ```toml
-[dependencies.rustc_version]
-git = "https://github.com/Kimundi/rustc-version-rs"
+[build-dependencies]
+rustc_version = "0.2"
 ```
+
+... and see the [docs](https://docs.rs/rustc_version) for how to use it.
+
 # Example
 
 ```rust
 // This could be a cargo build script
 
-extern crate rustc_version;
-use rustc_version::{version, version_matches, version_meta, Channel};
+use rustc_version::{version, version_meta, Channel, Version};
 
 fn main() {
     // Assert we haven't travelled back in time
-    assert!(version().major >= 1);
+    assert!(version().unwrap().major >= 1);
 
     // Set cfg flags depending on release channel
-    match version_meta().channel {
+    match version_meta().unwrap().channel {
         Channel::Stable => {
             println!("cargo:rustc-cfg=RUSTC_IS_STABLE");
         }
@@ -52,8 +58,8 @@ fn main() {
         }
     }
 
-    // Directly check a semver version requirment
-    if version_matches(">= 1.4.0") {
+    // Check for a minimum version
+    if version().unwrap() >= Version::parse("1.4.0").unwrap() {
         println!("cargo:rustc-cfg=compiler_has_important_bugfix");
     }
 }
