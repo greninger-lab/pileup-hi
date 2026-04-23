@@ -26,12 +26,14 @@ fn _main() -> Result<(), Error> {
 
     match params.command {
         Commands::Plp(params) => {
-            let engine = PileupEngine::initialize(params.inp, params.plp, PileupString::new())?;
+            let mut engine = PileupEngine::initialize(params.plp, PileupString::new())?;
+            engine.submit(params.inp)?;
             engine.run()?
         }
 
         Commands::Histo(params) => {
-            let engine = PileupEngine::initialize(params.inp, params.plp, BaseDepthString::new())?;
+            let mut engine = PileupEngine::initialize(params.plp, BaseDepthString::new())?;
+            engine.submit(params.inp)?;
             engine.run()?;
         }
     };

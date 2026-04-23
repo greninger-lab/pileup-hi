@@ -102,6 +102,10 @@ impl GenomeInterval {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.end >= self.start
+    }
+
     pub fn len(&self) -> i64 {
         self.end - self.start
     }

@@ -16,6 +16,7 @@ pub trait OrderedPileupOutput: Send + Sync + Clone + std::fmt::Debug {
 
     /// Update internal data with pileup alignment
     fn intake(&mut self, p: &PileupAlignment, refseq: &RefSeqHandle) -> Result<(), Error>;
+
     /// Update reference data given ref num, pos, name, and sequence
     fn set_ref_info(&mut self, tid: i32, pos: i64, ref_name: &str, refseq: &RefSeqHandle);
 
