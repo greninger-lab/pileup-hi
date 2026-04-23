@@ -7,7 +7,7 @@ use pileuphi_lib::{
     basedepth_string::BaseDepthString,
     engine::PileupEngine,
     errors::{Error, ErrorKind},
-    output::setup_exit_handler,
+    jobqueue::setup_exit_handler,
     params::{parse_or_quit, Commands},
     pileup_string::PileupString,
 };
