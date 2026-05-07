@@ -37,21 +37,11 @@ impl OrderedPileupOutput for PileupString {
         self.ref_pos
     }
 
-    fn set_ref_info(
-        &mut self,
-        tid: i32,
-        pos: i64,
-        ref_name: &str,
-        ref_seq: &RefSeqHandle,
-    ) {
+    fn set_ref_info(&mut self, tid: i32, pos: i64, ref_name: &str, ref_seq: &RefSeqHandle) {
         self.update(tid, pos, ref_name, ref_seq);
     }
 
-    fn intake(
-        &mut self,
-        p: &PileupAlignment,
-        refseq: &RefSeqHandle,
-    ) -> Result<(), Error> {
+    fn intake(&mut self, p: &PileupAlignment, refseq: &RefSeqHandle) -> Result<(), Error> {
         self.intake(p, refseq)
     }
 
@@ -75,13 +65,7 @@ impl OrderedPileupOutput for PileupString {
 }
 
 impl PileupString {
-    pub fn update(
-        &mut self,
-        tid: i32,
-        ref_pos: i64,
-        ref_name: &str,
-        ref_seq: &RefSeqHandle,
-    ) {
+    pub fn update(&mut self, tid: i32, ref_pos: i64, ref_name: &str, ref_seq: &RefSeqHandle) {
         self.tid = tid;
         self.ref_pos = ref_pos;
 
@@ -97,27 +81,14 @@ impl PileupString {
     }
 
     #[inline(always)]
-    pub fn intake(
-        &mut self,
-        p: &PileupAlignment,
-        refseq: &RefSeqHandle,
-    ) -> Result<(), Error> {
+    pub fn intake(&mut self, p: &PileupAlignment, refseq: &RefSeqHandle) -> Result<(), Error> {
         self.depth += 1;
-        write_plp(
-            p,
-            self.ref_pos,
-            &mut self.seqbuf,
-            &mut self.qualbuf,
-            refseq,
-        )?;
+        write_plp(p, self.ref_pos, &mut self.seqbuf, &mut self.qualbuf, refseq)?;
         Ok(())
     }
 
     #[inline(always)]
-    pub fn write<W: std::io::Write>(
-        &self,
-        writer: &mut W,
-    ) -> Result<(), Error> {
+    pub fn write<W: std::io::Write>(&self, writer: &mut W) -> Result<(), Error> {
         let mut buf = itoa::Buffer::new();
         // print! {"{}\t{}\t{}\t{}\t", self.ref_name, self.ref_pos + 1, char::from(self.ref_base), self.depth }
         writer.write_all(self.ref_name.as_bytes())?;
@@ -216,9 +187,7 @@ pub fn expand_insertions(
     let mut offset = 1;
     while k < ncig {
         match p.cstate.cig[k] {
-            Cigar::Pad(l) => {
-                seq_buf.extend(std::iter::repeat_n(b'*', l as usize))
-            }
+            Cigar::Pad(l) => seq_buf.extend(std::iter::repeat_n(b'*', l as usize)),
             Cigar::Ins(l) => {
                 for _ in 0..l as usize {
                     read_pos = p.qpos + offset - p.del as usize;

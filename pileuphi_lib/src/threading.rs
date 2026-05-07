@@ -89,8 +89,7 @@ impl PileupWorker {
         self.handle = Some(std::thread::spawn(move || {
             notify.mark_running();
 
-            let out =
-                get_writer_multi(&job.out, BUFWRITER_CAP, true, false).unwrap();
+            let out = get_writer_multi(&job.out, BUFWRITER_CAP, true, false).unwrap();
 
             let mut iterator = PileupIteratorCore::new(
                 &src,
@@ -127,9 +126,7 @@ impl ThreadPool {
             workers: Vec::with_capacity(n_threads),
         };
 
-        (0..n_threads).for_each(|_| {
-            s.workers.push(PileupWorker::new(Arc::clone(&s.notify)))
-        });
+        (0..n_threads).for_each(|_| s.workers.push(PileupWorker::new(Arc::clone(&s.notify))));
 
         s
     }
@@ -137,8 +134,6 @@ impl ThreadPool {
     pub fn get_available(&mut self) -> Option<&mut PileupWorker> {
         self.notify.wait_while();
 
-        self.workers
-            .iter_mut()
-            .find_map(|w| w.is_finished().then_some(w))
+        self.workers.iter_mut().find_map(|w| w.is_finished().then_some(w))
     }
 }

@@ -1,7 +1,4 @@
-use crate::alignment::{
-    cigar2rlen, CigarState, PileupAlignment, PileupAlignmentRef,
-    CIGAR_STATE_UNINIT,
-};
+use crate::alignment::{cigar2rlen, CigarState, PileupAlignment, PileupAlignmentRef, CIGAR_STATE_UNINIT};
 use crate::cigar_resolve::resolve_cigar;
 use crate::errors::{Error, ErrorKind};
 use crate::overlap::{MapOverlaps, OverlapMap};
@@ -57,12 +54,7 @@ impl ReadBuffer {
     #[inline(always)]
     /// Store the read we've decided to push in the buffer, wrapping it in an Rc pointer and
     /// performing mate overlap-correction if requested by caller.
-    pub fn store(
-        &mut self,
-        r: &Record,
-        read_len_from_cigar: i64,
-        pos: i64,
-    ) -> Result<(), Error> {
+    pub fn store(&mut self, r: &Record, read_len_from_cigar: i64, pos: i64) -> Result<(), Error> {
         let cstate = CigarState {
             cig: r.cigar(),
             icig: CIGAR_STATE_UNINIT,
@@ -97,8 +89,7 @@ impl ReadBuffer {
             self.tail.set_to_rec(r);
         }
 
-        self.rbuf
-            .push(ReadBufferEntry::Occupied(Rc::clone(&plp_ref)));
+        self.rbuf.push(ReadBufferEntry::Occupied(Rc::clone(&plp_ref)));
         self.depth += 1;
         Ok(())
     }
@@ -114,12 +105,7 @@ impl ReadBuffer {
     ///
     /// Notably, reads found to be in a new reference are still added.
     #[inline(always)]
-    pub fn attempt_push(
-        &mut self,
-        tid: i32,
-        pos: i64,
-        r: &Record,
-    ) -> Result<BufPushResult, Error> {
+    pub fn attempt_push(&mut self, tid: i32, pos: i64, r: &Record) -> Result<BufPushResult, Error> {
         if r.is_unmapped() {
             if let Some(ref mut ov) = self.overlap_map {
                 ov.delete_read(r);
@@ -130,17 +116,11 @@ impl ReadBuffer {
 
         // check for unsorted input
         if unlikely(r.tid() < self.tail.tid) {
-            return Err(Error::from(ErrorKind::BamNotSortedByReference(
-                self.tail.tid,
-                r.tid(),
-            )));
+            return Err(Error::from(ErrorKind::BamNotSortedByReference(self.tail.tid, r.tid())));
         }
 
         if unlikely(r.pos() < self.tail.pos) {
-            return Err(Error::from(ErrorKind::BamNotSortedByCoordinate(
-                self.tail.pos,
-                r.pos(),
-            )));
+            return Err(Error::from(ErrorKind::BamNotSortedByCoordinate(self.tail.pos, r.pos())));
         }
 
         let read_len_from_cigar = cigar2rlen(r);
@@ -180,11 +160,7 @@ impl ReadBuffer {
     pub fn new(depth: usize, disable_overlaps: bool) -> Self {
         let rbuf: Vec<ReadBufferEntry> = Vec::with_capacity(500);
 
-        let max_depth = if depth.cmp(&0).is_eq() {
-            usize::MAX
-        } else {
-            depth
-        };
+        let max_depth = if depth.cmp(&0).is_eq() { usize::MAX } else { depth };
         let len = 0;
 
         let head = BufferBoundary::new();
@@ -243,9 +219,7 @@ impl ReadBuffer {
 
         for entry in self.rbuf.drain(..) {
             match entry {
-                ReadBufferEntry::Occupied(plp) => {
-                    dest.push(ReadBufferEntry::Occupied(plp))
-                }
+                ReadBufferEntry::Occupied(plp) => dest.push(ReadBufferEntry::Occupied(plp)),
                 ReadBufferEntry::Tombstone => (),
             }
         }
@@ -263,8 +237,7 @@ impl ReadBuffer {
             let mut indexes = self.pending_del_indexes.borrow_mut();
 
             for idx in indexes.drain(..) {
-                let entry =
-                    self.rbuf.get_mut(idx).expect("Bad buffer removal index");
+                let entry = self.rbuf.get_mut(idx).expect("Bad buffer removal index");
                 match entry {
                     ReadBufferEntry::Tombstone => {
                         panic!("Attempted to delete tombstone in buffer")

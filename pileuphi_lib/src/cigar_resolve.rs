@@ -38,11 +38,7 @@ pub fn resolve_cigar(plp: &mut PileupAlignment, pos: i64) {
             for idx in 0..ncig {
                 k = idx;
                 match cig[k] {
-                    Cigar::Match(_)
-                    | Cigar::Del(_)
-                    | Cigar::RefSkip(_)
-                    | Cigar::Equal(_)
-                    | Cigar::Diff(_) => break,
+                    Cigar::Match(_) | Cigar::Del(_) | Cigar::RefSkip(_) | Cigar::Equal(_) | Cigar::Diff(_) => break,
 
                     Cigar::Ins(l) | Cigar::SoftClip(l) => {
                         cs.iseq += l as usize;
@@ -66,11 +62,7 @@ pub fn resolve_cigar(plp: &mut PileupAlignment, pos: i64) {
             // to it.
             let op2 = cig[cs.icig + 1];
             match op2 {
-                Cigar::Match(_)
-                | Cigar::Del(_)
-                | Cigar::RefSkip(_)
-                | Cigar::Equal(_)
-                | Cigar::Diff(_) => {
+                Cigar::Match(_) | Cigar::Del(_) | Cigar::RefSkip(_) | Cigar::Equal(_) | Cigar::Diff(_) => {
                     // if the old cigar we choose to move past is a read or reference consuming,
                     // update the indexes accordingly.
                     let op = cig[cs.icig];
@@ -106,16 +98,12 @@ pub fn resolve_cigar(plp: &mut PileupAlignment, pos: i64) {
 
                         let next_op = cig[k];
                         match next_op {
-                            Cigar::Match(_)
-                            | Cigar::Del(_)
-                            | Cigar::RefSkip(_)
-                            | Cigar::Equal(_)
-                            | Cigar::Diff(_) => break, // found it!
+                            Cigar::Match(_) | Cigar::Del(_) | Cigar::RefSkip(_) | Cigar::Equal(_) | Cigar::Diff(_) => {
+                                break
+                            } // found it!
 
                             // didn't find it, but need to up query pos...
-                            Cigar::Ins(l) | Cigar::SoftClip(l) => {
-                                cs.iseq += l as usize
-                            }
+                            Cigar::Ins(l) | Cigar::SoftClip(l) => cs.iseq += l as usize,
                             _ => (),
                         }
                     }
@@ -142,9 +130,7 @@ pub fn resolve_cigar(plp: &mut PileupAlignment, pos: i64) {
     plp.del = false;
 
     // our position is right at the edge of an operation, so peek the next one.
-    if (cs.bam_pos + op.len() as i64) as usize - 1 == pos as usize
-        && cs.icig + 1 < ncig
-    {
+    if (cs.bam_pos + op.len() as i64) as usize - 1 == pos as usize && cs.icig + 1 < ncig {
         let op2 = cig[cs.icig + 1];
 
         match op2 {

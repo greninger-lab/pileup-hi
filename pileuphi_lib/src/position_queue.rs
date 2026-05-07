@@ -98,10 +98,7 @@ impl GenomeInterval {
         if n_chunks == 1 {
             GenomeIntervalIterator::new(self, i64::MAX)
         } else {
-            GenomeIntervalIterator::new(
-                self,
-                (self.end - self.start) / n_chunks + 1,
-            )
+            GenomeIntervalIterator::new(self, (self.end - self.start) / n_chunks + 1)
         }
     }
 
@@ -115,10 +112,7 @@ impl GenomeInterval {
 }
 
 // split a str by a delimiter and convert empty prefix/suffix to None
-fn split_check_ends(
-    s: &str,
-    delim: char,
-) -> Option<(Option<&str>, Option<&str>)> {
+fn split_check_ends(s: &str, delim: char) -> Option<(Option<&str>, Option<&str>)> {
     s.split_once(delim).map(|(pre, post)| {
         (
             pre.is_empty().not().then_some(pre),
@@ -209,10 +203,7 @@ fn parse_region_string(s: &str) -> Result<RawPileupRegion, Error> {
     }
 }
 
-pub fn create_region_queue(
-    argstr: &str,
-    header: &HeaderView,
-) -> Result<Vec<GenomeInterval>, Error> {
+pub fn create_region_queue(argstr: &str, header: &HeaderView) -> Result<Vec<GenomeInterval>, Error> {
     let mut rawregions = vec![];
 
     for s in argstr.split_terminator(",") {
@@ -223,17 +214,15 @@ pub fn create_region_queue(
 }
 
 /// Create a PositionQueue from the entire header
-pub fn intervals_from_header(
-    header: &HeaderView,
-) -> Result<Vec<GenomeInterval>, Error> {
+pub fn intervals_from_header(header: &HeaderView) -> Result<Vec<GenomeInterval>, Error> {
     let mut queue = Vec::new();
 
     for tid in 0..header.target_count() {
-        let end = header.target_len(tid).ok_or(Error::from(
-            ErrorKind::AnomalousData(format!(
+        let end = header
+            .target_len(tid)
+            .ok_or(Error::from(ErrorKind::AnomalousData(format!(
                 "Faulty BAM header: unable to find target len for ref ID {tid}"
-            )),
-        ))? as i64;
+            ))))? as i64;
 
         let name = header.tid2name(tid);
 

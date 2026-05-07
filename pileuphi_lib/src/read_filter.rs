@@ -45,10 +45,7 @@ impl BamFlag {
 
 #[cfg(feature = "cli")]
 impl std::fmt::Display for BamFlag {
-    fn fmt(
-        &self,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> Result<(), std::fmt::Error> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(f, "{}", self.as_str())
     }
 }
@@ -62,11 +59,7 @@ fn add_to_flag(flags: &[BamFlag], flag: &mut u16) -> Result<(), Error> {
 }
 
 impl ReadFilter {
-    pub fn new(
-        count_orphans: bool,
-        excl_flags: &[BamFlag],
-        incl_flags: &[BamFlag],
-    ) -> Result<Self, Error> {
+    pub fn new(count_orphans: bool, excl_flags: &[BamFlag], incl_flags: &[BamFlag]) -> Result<Self, Error> {
         let mut s = Self {
             inc_flag: 0,
             exc_flag: 0,

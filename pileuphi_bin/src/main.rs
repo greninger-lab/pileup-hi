@@ -20,33 +20,21 @@ fn _main() -> Result<(), Error> {
     let params = parse_or_quit();
     setup_exit_handler();
 
-    env_logger::Builder::from_env(
-        env_logger::Env::default().default_filter_or("info"),
-    )
-    .init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     #[cfg(debug_assertions)]
     warn!("Running the debug build of pileup-hi! This is slow.");
 
     match params.command {
         Commands::Plp(params) => {
-            let mut engine = PileupEngine::init_sink(
-                params.plp,
-                PileupString::new(),
-                &params.output,
-                params.threads,
-            )?;
+            let mut engine = PileupEngine::init_sink(params.plp, PileupString::new(), &params.output, params.threads)?;
             engine.submit(params.inp)?;
             engine.run()?
         }
 
         Commands::Histo(params) => {
-            let mut engine = PileupEngine::init_sink(
-                params.plp,
-                BaseDepthString::new(),
-                &params.output,
-                params.threads,
-            )?;
+            let mut engine =
+                PileupEngine::init_sink(params.plp, BaseDepthString::new(), &params.output, params.threads)?;
             engine.submit(params.inp)?;
             engine.run()?;
         }

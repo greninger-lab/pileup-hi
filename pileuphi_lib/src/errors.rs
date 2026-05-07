@@ -11,10 +11,7 @@ pub struct Error {
 impl Error {
     /// Handler for non-typed errors like anyhow used by dependencies. Instead of copying entire
     /// source string we log it once.
-    pub fn from_generic(
-        e: Box<dyn std::error::Error>,
-        kind: ErrorKind,
-    ) -> Self {
+    pub fn from_generic(e: Box<dyn std::error::Error>, kind: ErrorKind) -> Self {
         error!("{e}");
         Self { kind }
     }

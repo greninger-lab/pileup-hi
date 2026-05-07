@@ -71,11 +71,7 @@ impl<T: OrderedPileupOutput> PileupIteratorCore<T> {
 
         let rbuf = ReadBuffer::new(params.depth, params.disable_overlaps);
 
-        let read_filter = ReadFilter::new(
-            params.count_orphans,
-            &params.excl_flags,
-            &params.incl_flags,
-        )?;
+        let read_filter = ReadFilter::new(params.count_orphans, &params.excl_flags, &params.incl_flags)?;
 
         let cur_rec = Record::new();
 
@@ -142,22 +138,10 @@ impl<T: OrderedPileupOutput> PileupIteratorCore<T> {
             let output = self.dest.cur();
             output.clear();
 
-            output.set_ref_info(
-                self.tid,
-                self.pos,
-                &self.reader.cur_ref,
-                &self.refseq,
-            );
+            output.set_ref_info(self.tid, self.pos, &self.reader.cur_ref, &self.refseq);
 
             if !skip {
-                generated = generate_pileup(
-                    rbuf,
-                    &self.refseq,
-                    output,
-                    self.pos,
-                    self.tid,
-                    self.min_baseq,
-                )?;
+                generated = generate_pileup(rbuf, &self.refseq, output, self.pos, self.tid, self.min_baseq)?;
                 depth = output.depth();
             } else {
                 generated = false;
@@ -168,10 +152,9 @@ impl<T: OrderedPileupOutput> PileupIteratorCore<T> {
         let written = match self.emit {
             EmitStrategy::Nothing => self.dest.reject(),
             EmitStrategy::ByPos => self.dest.check(generated || depth > 0)?,
-            EmitStrategy::ByRef => self.dest.check(
-                (self.tid == self.last_tid_with_cov)
-                    || self.rbuf.head.tid == self.tid,
-            )?,
+            EmitStrategy::ByRef => self
+                .dest
+                .check((self.tid == self.last_tid_with_cov) || self.rbuf.head.tid == self.tid)?,
             EmitStrategy::Everything => self.dest.take()?,
         };
 
@@ -188,10 +171,7 @@ impl<T: OrderedPileupOutput> PileupIteratorCore<T> {
 
     /// When given a region not starting at zero, rewind by 2X read length in order to populate the
     /// overlap map to ensure read mates get nulled.
-    fn preload_region(
-        &mut self,
-        interval: &GenomeInterval,
-    ) -> Result<(), Error> {
+    fn preload_region(&mut self, interval: &GenomeInterval) -> Result<(), Error> {
         let rewind = (interval.start - (2 * self.read_len) as i64).max(0);
 
         self.pos = rewind;
@@ -201,8 +181,7 @@ impl<T: OrderedPileupOutput> PileupIteratorCore<T> {
         self.tid = interval.tid as i32;
         self.next_tid = -1; // make the step() check until max_pos is hit
 
-        self.reader
-            .init_to_ref(interval.tid as u32, self.pos, interval.end)?;
+        self.reader.init_to_ref(interval.tid as u32, self.pos, interval.end)?;
 
         let preset = self.emit.clone();
         self.emit = EmitStrategy::Nothing;
@@ -233,25 +212,15 @@ impl<T: OrderedPileupOutput> PileupIteratorCore<T> {
         let output = self.dest.cur();
 
         // purge read buffer to remove any reads spanning the old ref to update head and tail.
-        generate_pileup(
-            &mut self.rbuf,
-            &self.refseq,
-            output,
-            i64::MAX,
-            self.tid,
-            self.min_baseq,
-        )?;
+        generate_pileup(&mut self.rbuf, &self.refseq, output, i64::MAX, self.tid, self.min_baseq)?;
 
         output.clear();
 
         if interval.start != 0 && self.rbuf.overlap_map.is_some() {
             self.preload_region(&interval)?;
         } else {
-            self.reader.init_to_ref(
-                interval.tid as u32,
-                interval.start,
-                interval.end,
-            )?;
+            self.reader
+                .init_to_ref(interval.tid as u32, interval.start, interval.end)?;
             self.pos = interval.start;
             self.next_pos = interval.start;
         }
@@ -342,10 +311,7 @@ impl<T: OrderedPileupOutput> PileupIteratorCore<T> {
     }
 
     /// main function of the PileupIterator: run it on all the query intervals given.
-    pub fn auto_loop2(
-        &mut self,
-        interval: &GenomeInterval,
-    ) -> Result<(), Error> {
+    pub fn auto_loop2(&mut self, interval: &GenomeInterval) -> Result<(), Error> {
         self.read_len = BamReader::sample_read_len(&self.reader.src)?;
 
         self.set_ref(interval.clone())?;
@@ -385,8 +351,7 @@ impl<T: OrderedPileupOutput> PileupIteratorCore<T> {
 
             // we have reads with coordinates in the buffer that we need to process
             if self.rbuf.head.pos < self.pos
-                || (matches!(self.emit, EmitStrategy::ByRef)
-                    && self.rbuf.head.tid == self.tid)
+                || (matches!(self.emit, EmitStrategy::ByRef) && self.rbuf.head.tid == self.tid)
                 || matches!(self.emit, EmitStrategy::Everything)
             {
                 if self.pos < self.next_pos {
@@ -476,8 +441,7 @@ pub struct PileupIterator<T: OrderedPileupOutput> {
 }
 
 #[allow(type_alias_bounds)]
-pub type PileupIterResult<'a, T: OrderedPileupOutput> =
-    Option<Result<PileupCoordinate<'a, T>, Error>>;
+pub type PileupIterResult<'a, T: OrderedPileupOutput> = Option<Result<PileupCoordinate<'a, T>, Error>>;
 
 impl<T: OrderedPileupOutput> PileupIterator<T> {
     pub fn advance(&mut self) -> PileupIterResult<'_, T> {

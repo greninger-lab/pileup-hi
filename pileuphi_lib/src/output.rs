@@ -21,20 +21,10 @@ pub trait OrderedPileupOutput: Send + Sync + Clone + std::fmt::Debug {
     fn pos(&self) -> i64;
 
     /// Update internal data with pileup alignment
-    fn intake(
-        &mut self,
-        p: &PileupAlignment,
-        refseq: &RefSeqHandle,
-    ) -> Result<(), Error>;
+    fn intake(&mut self, p: &PileupAlignment, refseq: &RefSeqHandle) -> Result<(), Error>;
 
     /// Update reference data given ref num, pos, name, and sequence
-    fn set_ref_info(
-        &mut self,
-        tid: i32,
-        pos: i64,
-        ref_name: &str,
-        refseq: &RefSeqHandle,
-    );
+    fn set_ref_info(&mut self, tid: i32, pos: i64, ref_name: &str, refseq: &RefSeqHandle);
 
     fn write<W: std::io::Write>(&self, writer: &mut W) -> Result<(), Error>;
 
@@ -73,18 +63,13 @@ impl<T: OrderedPileupOutput> OutputFormat<T> {
     pub fn take(&mut self) -> Result<PileupCoordinate<'_, T>, Error> {
         match self.dest {
             OutputDestination::Memory => (),
-            OutputDestination::Writer(ref mut writer) => {
-                self.output.write(writer)?
-            }
+            OutputDestination::Writer(ref mut writer) => self.output.write(writer)?,
         };
 
         Ok(PileupCoordinate::Coverage(&self.output))
     }
 
-    pub fn check(
-        &mut self,
-        emit: bool,
-    ) -> Result<PileupCoordinate<'_, T>, Error> {
+    pub fn check(&mut self, emit: bool) -> Result<PileupCoordinate<'_, T>, Error> {
         if emit {
             self.take()
         } else {

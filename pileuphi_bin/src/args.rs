@@ -1,6 +1,4 @@
-use clap::{
-    crate_authors, crate_description, crate_version, Parser, Subcommand,
-};
+use clap::{crate_authors, crate_description, crate_version, Parser, Subcommand};
 
 use pileuphi_lib::param::{InputParams, PileupParams, STDOUT_ARG_STR};
 

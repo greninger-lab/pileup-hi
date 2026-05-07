@@ -5,9 +5,7 @@ use crate::{
     output::{OrderedPileupOutput, OutputDestination, OutputFormat},
     params::{InputParams, PileupParams},
     pileup_iterator::{PileupIterator, PileupIteratorCore},
-    position_queue::{
-        create_region_queue, intervals_from_header, GenomeInterval,
-    },
+    position_queue::{create_region_queue, intervals_from_header, GenomeInterval},
     refseq::{RefSeq, RefSeqHandle},
     threading::ThreadPool,
     utils::get_writer_multi,
@@ -62,10 +60,7 @@ pub struct PileupEngine<T: OrderedPileupOutput> {
 pub type PileupStream<T: OrderedPileupOutput + 'static> = PileupEngine<T>;
 
 impl<T: OrderedPileupOutput + 'static> PileupStream<T> {
-    pub fn get_iter(
-        &mut self,
-        input: InputParams,
-    ) -> Result<Vec<PileupIterator<T>>, Error> {
+    pub fn get_iter(&mut self, input: InputParams) -> Result<Vec<PileupIterator<T>>, Error> {
         self.submit(input)?;
         self.yield_iterator()
     }
@@ -102,10 +97,7 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
                     &query.src,
                     self.get_refseq(&query.intervals[0].name)?,
                     &self.plp_params,
-                    OutputFormat::new(
-                        self.output.clone(),
-                        OutputDestination::Memory,
-                    ),
+                    OutputFormat::new(self.output.clone(), OutputDestination::Memory),
                 )?;
 
                 _iterator.set_ref(interval.clone())?;
@@ -121,18 +113,13 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
         }
     }
 
-    fn init_core(
-        plp_params: PileupParams,
-        output_type: T,
-    ) -> Result<PileupEngine<T>, Error> {
+    fn init_core(plp_params: PileupParams, output_type: T) -> Result<PileupEngine<T>, Error> {
         let refseq = if let Some(ref fasta) = plp_params.refseq {
             if !std::fs::exists(std::path::Path::new(fasta))? {
-                return Err(Error::from(ErrorKind::IOError(
-                    std::io::Error::new(
-                        std::io::ErrorKind::NotFound,
-                        "Fasta file {fasta} doesn't exist!",
-                    ),
-                )));
+                return Err(Error::from(ErrorKind::IOError(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "Fasta file {fasta} doesn't exist!",
+                ))));
             }
             Some(RefSeq::new(fasta.clone()))
         } else {
@@ -149,10 +136,7 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
         })
     }
 
-    pub fn init_stream(
-        plp_params: PileupParams,
-        output: T,
-    ) -> Result<PileupStream<T>, Error> {
+    pub fn init_stream(plp_params: PileupParams, output: T) -> Result<PileupStream<T>, Error> {
         Self::init_core(plp_params, output)
     }
 
@@ -215,12 +199,7 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
     fn run_all_1t(&self) -> Result<(), Error> {
         if let Some(ref query) = self.get_query() {
             for interval in query.intervals.iter() {
-                let main_writer = get_writer_multi(
-                    self.dest.as_ref().unwrap(),
-                    BUFWRITER_CAP,
-                    true,
-                    false,
-                )?;
+                let main_writer = get_writer_multi(self.dest.as_ref().unwrap(), BUFWRITER_CAP, true, false)?;
 
                 let refseq_handle = self.get_refseq(&interval.name)?;
 
@@ -228,10 +207,7 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
                     &query.src,
                     refseq_handle,
                     &self.plp_params,
-                    OutputFormat::new(
-                        self.output.clone(),
-                        OutputDestination::Writer(main_writer),
-                    ),
+                    OutputFormat::new(self.output.clone(), OutputDestination::Writer(main_writer)),
                 )?;
 
                 iterator.auto_loop2(interval)?;
@@ -260,8 +236,7 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
                     if let Some(job) = jobs.queue.pop_front() {
                         n_jobs += 1;
 
-                        let refseq_handle =
-                            self.get_refseq(&job.interval.name)?;
+                        let refseq_handle = self.get_refseq(&job.interval.name)?;
 
                         worker.run(
                             n_jobs,

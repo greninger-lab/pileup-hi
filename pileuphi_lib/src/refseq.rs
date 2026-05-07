@@ -22,17 +22,11 @@ struct FastaReader {
 pub type RefSeqHandle = Arc<Option<Vec<u8>>>;
 
 pub trait ReadsFasta {
-    fn read_to_bytes(
-        &mut self,
-        refname: &str,
-    ) -> Result<Option<Vec<u8>>, Error>;
+    fn read_to_bytes(&mut self, refname: &str) -> Result<Option<Vec<u8>>, Error>;
 }
 
 impl ReadsFasta for FastaIndexedReader {
-    fn read_to_bytes(
-        &mut self,
-        refname: &str,
-    ) -> Result<Option<Vec<u8>>, Error> {
+    fn read_to_bytes(&mut self, refname: &str) -> Result<Option<Vec<u8>>, Error> {
         // ref not found
         if self.inner.fetch_all(refname).is_err() {
             warn!("Unable to find ref {refname} in fasta. Proceeding without reference...");
@@ -47,10 +41,7 @@ impl ReadsFasta for FastaIndexedReader {
 }
 
 impl ReadsFasta for FastaReader {
-    fn read_to_bytes(
-        &mut self,
-        refname: &str,
-    ) -> Result<Option<Vec<u8>>, Error> {
+    fn read_to_bytes(&mut self, refname: &str) -> Result<Option<Vec<u8>>, Error> {
         let mut record: Record = Default::default();
 
         loop {
@@ -89,37 +80,24 @@ impl RefSeq {
 
         let reader: Box<dyn ReadsFasta> = if !faidx.exists() {
             Box::new(FastaReader {
-                inner: fasta::Reader::from_file(Path::new(&file)).map_err(
-                    |e| {
-                        Error::from_generic(
-                            e.into(),
-                            ErrorKind::RefSeqError(
-                                "Failed to create FASTA reader",
-                            ),
-                        )
-                    },
-                )?,
+                inner: fasta::Reader::from_file(Path::new(&file)).map_err(|e| {
+                    Error::from_generic(e.into(), ErrorKind::RefSeqError("Failed to create FASTA reader"))
+                })?,
             })
         } else {
             Box::new(FastaIndexedReader {
-                inner: fasta::IndexedReader::from_file(&Path::new(&file))
-                    .map_err(|e| {
-                        Error::from_generic(
-                            e.into(),
-                            ErrorKind::RefSeqError(
-                                "Failed to create indexed FASTA reader",
-                            ),
-                        )
-                    })?,
+                inner: fasta::IndexedReader::from_file(&Path::new(&file)).map_err(|e| {
+                    Error::from_generic(
+                        e.into(),
+                        ErrorKind::RefSeqError("Failed to create indexed FASTA reader"),
+                    )
+                })?,
             })
         };
         Ok(reader)
     }
 
-    pub fn load_seq(
-        file_name: &str,
-        ref_name: &str,
-    ) -> Result<Option<Vec<u8>>, Error> {
+    pub fn load_seq(file_name: &str, ref_name: &str) -> Result<Option<Vec<u8>>, Error> {
         let mut reader = RefSeq::get_reader(file_name)?;
         reader.read_to_bytes(ref_name)
     }
