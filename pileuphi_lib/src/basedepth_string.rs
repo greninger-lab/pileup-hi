@@ -5,6 +5,28 @@ use rust_htslib::bam::record::Cigar;
 use std::ops::AddAssign;
 
 #[derive(Clone, Debug)]
+/// Writes itself into a tab-delimited histogram with counts for ACGTN, as well as gaps, and refskips. Indels are also counted, in the format <COUNT>[<INDEL_SEQUENCE>]
+///
+/// ```text
+/// 1  2 3 4 5 6 7 8 9 10 11                                       12
+/// |  | | | | | | | | |  |                                         |
+/// c1 5 9 0 7 0 0 0 2 0 [2GTTAAC 1*TTAA* 1GTT*** 1***AAC 1**TA**] [1C 1CGG]
+///
+///  1: reference name
+///  2: reference coordinate
+///  3: depth (not including gaps)
+///  4: #A's
+///  5: #G's
+///  6: #C's
+///  7: #T's
+///  8: #N's
+///  9: #Gaps
+///  10: #Refskips
+///  11: space-delimited unique insertions*
+///  12: space-delimited unique deletions*
+///
+///  In column 11, the first insertion has sequence GTTAAC and was observed 2x
+/// ```
 pub struct BaseDepthString {
     tid: i32,
     pos: i64,

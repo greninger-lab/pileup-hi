@@ -15,6 +15,7 @@ const F_REFSKIP: u8 = b'>';
 const R_REFSKIP: u8 = b'<';
 
 #[derive(Clone, Debug)]
+/// The standard samtools mpileup string. See the samtools mpileup docs for details.
 pub struct PileupString {
     seqbuf: Vec<u8>,
     qualbuf: Vec<u8>,

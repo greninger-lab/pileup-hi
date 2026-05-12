@@ -12,8 +12,11 @@ use crate::{
 };
 
 use log::{info, warn};
-use std::cell::{Ref, RefCell};
 use std::sync::Arc;
+use std::{
+    cell::{Ref, RefCell},
+    marker::PhantomData,
+};
 
 pub const BUFWRITER_CAP: usize = 2 * 1024 * 1024;
 pub const MIN_BAM_READ_THREADS: usize = 2;
@@ -48,19 +51,19 @@ impl TryFrom<InputParams> for PileupEngineQuery {
 pub struct PileupEngine<T: OrderedPileupOutput> {
     query: Option<RefCell<PileupEngineQuery>>,
     plp_params: PileupParams,
-    output: T,
+    _t: PhantomData<T>,
     dest: Option<OutputDataDest>,
     threads: usize,
     refseq: Option<RefSeq>,
 }
 
-/// An interface to generate pileups in memory, not writing to file. Single-threaded; parallelism is
-/// left up to the user.
+/// An interface to generate pileups in memory, not writing to file. Single-threaded; parallelism is left up to the user.
 pub struct PileupStream<T: OrderedPileupOutput + 'static> {
     engine: PileupEngine<T>,
 }
 
 impl<T: OrderedPileupOutput + 'static> PileupStream<T> {
+    /// Return an iterator of pileups across the coordinates of the input regions specified. One iterator will be returned per region.
     pub fn get_iter(&mut self, input: InputParams) -> Result<Vec<PileupIterator<T>>, Error> {
         self.engine.submit(input)?;
         self.engine.yield_iterator()
@@ -73,7 +76,7 @@ pub struct PileupSink<T: OrderedPileupOutput + 'static> {
 }
 
 impl<T: OrderedPileupOutput + 'static> PileupSink<T> {
-    /// Tell the engine to run over the specified input param region
+    /// Tell the engine to run over the specified input region
     pub fn submit(&mut self, input: InputParams) -> Result<(), Error> {
         self.engine.submit(input)
     }
@@ -87,7 +90,7 @@ impl<T: OrderedPileupOutput + 'static> PileupSink<T> {
 ///////////////////////////////////////////////////////////////
 
 impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
-    pub fn submit(&mut self, input: InputParams) -> Result<(), Error> {
+    fn submit(&mut self, input: InputParams) -> Result<(), Error> {
         self.query = Some(RefCell::new(input.try_into()?));
         Ok(())
     }
@@ -105,7 +108,7 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
                     &query.src,
                     self.get_refseq(&query.intervals[0].name)?,
                     &self.plp_params,
-                    OutputFormat::new(self.output.clone(), OutputDestination::Memory),
+                    OutputFormat::new(T::new(), OutputDestination::Memory),
                 )?;
 
                 _iterator.set_ref(interval.clone())?;
@@ -121,7 +124,7 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
         }
     }
 
-    fn init_core(plp_params: PileupParams, output_type: T) -> Result<PileupEngine<T>, Error> {
+    fn init_core(plp_params: PileupParams) -> Result<PileupEngine<T>, Error> {
         let refseq = if let Some(ref fasta) = plp_params.refseq {
             if !std::fs::exists(std::path::Path::new(fasta))? {
                 return Err(Error::from(ErrorKind::IOError(std::io::Error::new(
@@ -137,7 +140,7 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
         Ok(Self {
             query: None,
             plp_params,
-            output: output_type,
+            _t: PhantomData,
             dest: None,
             threads: 1,
             refseq,
@@ -145,21 +148,16 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
     }
 
     /// Return an engine for iterating over records via the advance() API.
-    pub fn init_stream(plp_params: PileupParams, output: T) -> Result<PileupStream<T>, Error> {
+    pub fn init_stream(plp_params: PileupParams) -> Result<PileupStream<T>, Error> {
         Ok(PileupStream {
-            engine: Self::init_core(plp_params, output)?,
+            engine: Self::init_core(plp_params)?,
         })
     }
 
     /// Return an engine for writing to FILE, as opposed to memory. The number of threads dictates the number of regions processed in parallel.
-    pub fn init_sink(
-        plp_params: PileupParams,
-        output_type: T,
-        output: &str,
-        threads: usize,
-    ) -> Result<PileupSink<T>, Error> {
+    pub fn init_sink(plp_params: PileupParams, output: &str, threads: usize) -> Result<PileupSink<T>, Error> {
         assert!(threads > 0, "invalid number of threads passed: {}", threads);
-        let mut engine = Self::init_core(plp_params, output_type)?;
+        let mut engine = Self::init_core(plp_params)?;
         engine.threads = threads;
         engine.dest = Some(OutputDataDest::from_string(output));
         Ok(PileupSink { engine })
@@ -219,7 +217,7 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
                     &query.src,
                     refseq_handle,
                     &self.plp_params,
-                    OutputFormat::new(self.output.clone(), OutputDestination::Writer(main_writer)),
+                    OutputFormat::new(T::new(), OutputDestination::Writer(main_writer)),
                 )?;
 
                 iterator.auto_loop2(interval)?;
@@ -255,7 +253,7 @@ impl<T: OrderedPileupOutput + 'static> PileupEngine<T> {
                             self.plp_params.clone(),
                             job,
                             query.src.clone(),
-                            self.output.clone(),
+                            T::new(),
                             refseq_handle,
                         );
                     }

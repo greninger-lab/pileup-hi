@@ -7,7 +7,7 @@ use pileuphi_lib::{
     error::{Error, ErrorKind},
     outputs::BaseDepthString,
     outputs::PileupString,
-    setup_exit_handler, PileupEngine,
+    setup_exit_handler, PileupEngine, PileupSink,
 };
 
 use crate::args::{parse_or_quit, Commands};
@@ -27,14 +27,15 @@ fn _main() -> Result<(), Error> {
 
     match params.command {
         Commands::Plp(params) => {
-            let mut engine = PileupEngine::init_sink(params.plp, PileupString::new(), &params.output, params.threads)?;
+            let mut engine: PileupSink<PileupString> =
+                PileupEngine::init_sink(params.plp, &params.output, params.threads)?;
             engine.submit(params.inp)?;
             engine.run()?
         }
 
         Commands::Histo(params) => {
-            let mut engine =
-                PileupEngine::init_sink(params.plp, BaseDepthString::new(), &params.output, params.threads)?;
+            let mut engine: PileupSink<BaseDepthString> =
+                PileupEngine::init_sink(params.plp, &params.output, params.threads)?;
             engine.submit(params.inp)?;
             engine.run()?;
         }
