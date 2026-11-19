@@ -4,7 +4,9 @@
 pileup jellyfish" width="65%"/> </p>
 
 <div align="center"> Extensible, high-throughput pileup generation from
-SAM/BAM/CRAM</div>   
+SAM/BAM/CRAM <br>
+<a href=https://academic.oup.com/bioinformatics/article/42/10/btag721/8842597?login=true#579364384>Manuscript</a>
+</div>   
 
 ## Table of contents
 * [what is pileup\-hi?](#what-is-pileup-hi)
@@ -119,7 +121,7 @@ c1	10	9	0	0	0	9	0	0	0	[]	     []
 You can also clone this repository and run the entire regression test suite. See [the testing section](#testing).
 
 ## When should I use it over _samtools mpileup_?
-This question is answered in detail in the manuscript associated with this software, which you can find [here]().
+This question is answered in detail in the manuscript associated with this software, which you can find [here](https://academic.oup.com/bioinformatics/article/42/10/btag721/8842597#579364384).
 In short:  
 
 1. You want to process alignments to very long (e.g. eukaryotic) genomes and want to save time.
