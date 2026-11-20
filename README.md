@@ -33,6 +33,7 @@ this repository contains:
 - the pileup-hi_bin binary crate, which behaves similarly to _samtools mpileup_.
 - the pileup-hi_lib crate, which implements the underlying pileup engine and API.
 
+
 ## what is pileup-hi _not_?
 pileup-hi is not an end-to-end variant calling platform: like _samtools mpileup_, it is a low-level SAM/BAM parser that is meant to be built upon with tools that identify variants, assemble genomes, etc. (e.g. iVar). pileup-hi was developed to retrieve raw nucleotide alignment data from datasets with size/depth that is computationally challenging for other software. 
 
